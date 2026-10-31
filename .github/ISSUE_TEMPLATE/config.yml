@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Use the web app
+    url: https://openbuds.yashasewi.me
+    about: Control OnePlus Buds 4 from Chrome.

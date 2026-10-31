@@ -1,0 +1,120 @@
+name: Beta
+
+on:
+  schedule:
+    # 08:00 IST every other day. GitHub runs this from main; the job checks out dev.
+    - cron: "30 2 */2 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: release-beta
+  cancel-in-progress: false
+
+jobs:
+  dmg:
+    name: Build beta OpenBuds.dmg
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: dev
+          fetch-depth: 0
+
+      - name: Decide
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          base="$(gh release list --limit 100 --json tagName,isPrerelease,publishedAt \
+            --jq '([.[] | select(.isPrerelease and .publishedAt != null)] | sort_by(.publishedAt) | last | .tagName) // ""')"
+          if [ -z "$base" ]; then
+            base="$(gh release view --json tagName --jq '.tagName' || true)"
+          fi
+          publish=true
+          if [ -n "$base" ]; then
+            git fetch origin "refs/tags/${base}:refs/tags/${base}"
+            if git diff --quiet "${base}^{commit}" HEAD -- native; then
+              publish=false
+            fi
+          fi
+          tag="v0.3.$(git rev-list --count HEAD)"
+          if [ "$publish" = false ] && gh release view "$tag" >/dev/null 2>&1; then
+            has="$(gh release view "$tag" --json assets --jq 'any(.assets[]; .name == "OpenBuds.dmg")')"
+            if [ "$has" = "false" ]; then
+              publish=true
+            fi
+          fi
+          echo "publish=${publish}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "base=${base}" >> "$GITHUB_OUTPUT"
+          echo "Compare ${base:-no previous release} with $(git rev-parse --short HEAD): publish=${publish}"
+
+      - name: Build
+        if: steps.gate.outputs.publish == 'true'
+        working-directory: native
+        env:
+          DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+        run: swift build -c release --product OpenBuds
+
+      - name: Package
+        if: steps.gate.outputs.publish == 'true'
+        working-directory: native
+        env:
+          OPENBUDS_BETA: "1"
+        run: BUNDLE_VERSION="$(git rev-list --count HEAD)" ./scripts/package-app.sh
+
+      - name: Disk image
+        if: steps.gate.outputs.publish == 'true'
+        working-directory: native
+        run: |
+          set -e
+          stage="$(mktemp -d)"
+          cp -R .build/OpenBuds.app "$stage/OpenBuds.app"
+          ln -s /Applications "$stage/Applications"
+          for attempt in 1 2 3 4 5; do
+            if hdiutil create -volname OpenBuds -srcfolder "$stage" -ov -format UDZO "$PWD/.build/OpenBuds.dmg"; then
+              exit 0
+            fi
+            echo "hdiutil failed (attempt $attempt), retrying"
+            sleep $((attempt * 3))
+          done
+          exit 1
+
+      - name: Publish
+        if: steps.gate.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.gate.outputs.tag }}
+          BASE: ${{ steps.gate.outputs.base }}
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" native/.build/OpenBuds.dmg --clobber
+          else
+            notes="$(mktemp)"
+            printf '%s\n' \
+              'Beta from the dev branch. The stable download is unchanged.' \
+              '' \
+              '## Install' \
+              'Open the disk image and drag OpenBuds to Applications. macOS says it could not verify the app, because this build is ad-hoc signed and not notarized. Click Done, then System Settings, Privacy and Security, Open Anyway.' \
+              > "$notes"
+            args=(
+              --target "$sha"
+              --prerelease
+              --latest=false
+              --generate-notes
+              --notes-file "$notes"
+              --title "OpenBuds $TAG (Beta)"
+            )
+            if [ -n "$BASE" ]; then
+              args+=(--notes-start-tag "$BASE")
+            fi
+            gh release create "$TAG" native/.build/OpenBuds.dmg "${args[@]}"
+          fi

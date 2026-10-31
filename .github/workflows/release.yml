@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  dmg:
+    name: Build OpenBuds.dmg
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Build
+        working-directory: native
+        env:
+          DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+        run: swift build -c release --product OpenBuds
+
+      - name: Package
+        working-directory: native
+        run: BUNDLE_VERSION="$(git rev-list --count HEAD)" ./scripts/package-app.sh
+
+      - name: Disk image
+        working-directory: native
+        run: |
+          set -e
+          stage="$(mktemp -d)"
+          cp -R .build/OpenBuds.app "$stage/OpenBuds.app"
+          ln -s /Applications "$stage/Applications"
+          for attempt in 1 2 3 4 5; do
+            if hdiutil create -volname OpenBuds -srcfolder "$stage" -ov -format UDZO "$PWD/.build/OpenBuds.dmg"; then
+              exit 0
+            fi
+            echo "hdiutil failed (attempt $attempt), retrying"
+            sleep $((attempt * 3))
+          done
+          exit 1
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          short="$(plutil -extract CFBundleShortVersionString raw native/.build/OpenBuds.app/Contents/Info.plist)"
+          build="$(git rev-list --count HEAD)"
+          tag="v${short}.${build}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" native/.build/OpenBuds.dmg --clobber
+          else
+            start="$(gh release list --limit 30 --json tagName,isPrerelease --jq '[.[] | select(.isPrerelease|not)][0].tagName // ""')"
+            notes="$(mktemp)"
+            printf '%s\n' \
+              '## Install' \
+              'Open the disk image and drag OpenBuds to Applications. macOS says it could not verify the app, because this build is ad-hoc signed and not notarized. Click Done, then System Settings, Privacy and Security, Open Anyway.' \
+              > "$notes"
+            args=(--generate-notes --notes-file "$notes" --title "OpenBuds $tag")
+            if [ -n "$start" ]; then
+              args+=(--notes-start-tag "$start")
+            fi
+            gh release create "$tag" native/.build/OpenBuds.dmg "${args[@]}"
+          fi

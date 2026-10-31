@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.DS_Store
+__pycache__/
+*.pyc
+.build/
+.swiftpm/
+/docs/
+.codex/
+.cloudflare/
+.agents/
+.claude/
+*.dSYM/
+*.iconset/

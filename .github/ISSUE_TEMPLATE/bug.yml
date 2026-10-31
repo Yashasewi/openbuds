@@ -1,0 +1,43 @@
+name: Bug report
+description: Something in OpenBuds doesn't work
+labels: [bug]
+body:
+  - type: dropdown
+    id: client
+    attributes:
+      label: Which app?
+      options:
+        - Mac app
+        - Web app
+        - Both
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: OpenBuds version
+      description: Mac app → About. Web app → the version next to the Mac app button.
+      placeholder: v0.3.1
+  - type: input
+    id: firmware
+    attributes:
+      label: Earbuds firmware
+      description: Shown in the web app's About section.
+      placeholder: 138.138.105
+  - type: input
+    id: system
+    attributes:
+      label: macOS or Chrome version
+      placeholder: macOS 26.1, Chrome 141
+  - type: input
+    id: source
+    attributes:
+      label: Source of the information
+      description: Optional. If you cite protocol details, say where they came from, such as your own capture or a credited open-source project.
