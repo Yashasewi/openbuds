@@ -20,7 +20,7 @@ Merging into `main` builds `OpenBuds.dmg`, publishes a GitHub Release, and redep
 
 ## Protocol changes
 
-Every command both apps send is listed in an allow-list (`allowed` in `native/Sources/BudsKit/Protocol.swift` and its twin in `app/src/lib/protocol.ts`). Add a new command there with a payload check. Don't add firmware updates, factory reset, or anything that can't be undone from the app.
+Every command both apps send is listed in a per-model allow-list: a `ModelProfile` in `app/src/lib/protocol.ts` and its twin in `native/Sources/BudsKit/Profile.swift`. A model's profile lists only what a capture of that model shows, so a command is refused for any model whose profile does not name it. Add a new command to the profile it was captured on, with a payload check, and add its frames to the golden fixtures in `app/tests/fixtures`. Run `pnpm test` in `app/` and `swift test` in `native/` before you open a pull request (`UPDATE_FIXTURES=1 pnpm test` rewrites `profiles.json` after an intended profile change). Don't add firmware updates, factory reset, or anything that can't be undone from the app.
 
 The frame format is in [PROTOCOL.md](PROTOCOL.md).
 

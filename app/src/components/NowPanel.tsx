@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ANC_LEVELS, type AncLevel, type NoiseMode, type Side } from "../lib/protocol";
+import type { DeviceState } from "../lib/session";
 import { connect, disconnect, run, session, useAction, useBuds } from "../lib/store";
 import { SoundField } from "./SoundField";
 import { Button, Segmented, Status, cx } from "./ui";
@@ -11,6 +12,9 @@ const GROUPS: { value: Group; label: string }[] = [
   { value: "transparency", label: "Transparency" },
   { value: "off", label: "Off" },
 ];
+// A group is offered when the model's profile offers any mode in it.
+const offers = (modes: readonly NoiseMode[], group: Group) =>
+  modes.some((m) => groupOf(m) === group);
 const LEVELS: { value: AncLevel; label: string }[] = [
   { value: "smart", label: "Smart" },
   { value: "deep", label: "Deep" },
@@ -36,6 +40,10 @@ export function NowPanel() {
   const connected = connection === "connected";
   const mode = state.noise?.mode;
   const group = groupOf(mode);
+  const profile = state.profile;
+  const modes = profile?.noiseModes ?? [];
+  const groups = GROUPS.filter((g) => offers(modes, g.value));
+  const levels = LEVELS.filter((l) => modes.includes(l.value));
 
   async function onConnect() {
     setConnectError(undefined);
@@ -65,7 +73,18 @@ export function NowPanel() {
     <div className="flex flex-col gap-7">
       <header className="flex items-center justify-between gap-4">
         <div className="flex items-baseline gap-2.5">
-          <span className="text-[1.15rem] font-semibold tracking-[-0.02em]">Buds 4</span>
+          <span className="text-[1.15rem] font-semibold tracking-[-0.02em]">
+            {profile
+              ? profile.displayName.replace(/^OnePlus /, "")
+              : state.model
+                ? "Unsupported model"
+                : "Earbuds"}
+          </span>
+          {profile?.experimental && (
+            <span className="rounded-full bg-amber/15 px-2 py-0.5 text-[0.75rem] text-warn">
+              Experimental
+            </span>
+          )}
           {state.firmware && <span className="text-sm text-ink/50">firmware {state.firmware}</span>}
         </div>
         <ConnectionBadge connection={connection} />
@@ -88,12 +107,14 @@ export function NowPanel() {
         </p>
       </div>
 
-      {connected ? (
+      {connected && state.unsupported ? (
+        <Unsupported info={state.unsupported} />
+      ) : connected ? (
         <div className="flex flex-col gap-2.5">
           <Segmented
             label="Noise control"
             value={group}
-            options={GROUPS}
+            options={groups}
             disabled={busy}
             onChange={(g) => run("noise", () => session.setNoise(g))}
           />
@@ -108,7 +129,7 @@ export function NowPanel() {
                 size="sm"
                 label="Noise cancelling strength"
                 value={mode as AncLevel}
-                options={LEVELS}
+                options={levels}
                 disabled={busy}
                 onChange={(level) => run("noise", () => session.setNoise(level))}
               />
@@ -144,6 +165,30 @@ export function NowPanel() {
           <Button onClick={disconnect}>Disconnect</Button>
         </div>
       )}
+    </div>
+  );
+}
+
+function Unsupported({ info }: { info: NonNullable<DeviceState["unsupported"]> }) {
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(info.report);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  }
+  return (
+    <div className="flex flex-col gap-3 rounded-2xl bg-amber/15 px-4 py-3.5 text-[0.92rem]">
+      <p className="font-medium text-warn">
+        Unsupported model {info.productId}, firmware {info.firmware ?? "unknown"}
+      </p>
+      <p className="text-ink/70">
+        OpenBuds doesn’t know these earbuds yet, so it sends them nothing but identity reads. Copy
+        the diagnostics and attach them to a GitHub issue; they contain no personal data.
+      </p>
+      <Button onClick={copy}>{copied ? "Copied" : "Copy diagnostics"}</Button>
     </div>
   );
 }

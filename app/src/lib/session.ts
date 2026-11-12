@@ -1,6 +1,9 @@
 import {
   SERVICE,
-  MODEL,
+  PROBE_PROFILE,
+  profileFor,
+  timePayload,
+  diagnosticsReport,
   SWITCHES,
   EQ_MAX_CUSTOM,
   NOISE_REPORTS,
@@ -37,6 +40,8 @@ import {
   hearingSnap,
   type Bytes,
   type Capabilities,
+  type ModelProfile,
+  type UnsupportedInfo,
   type Frame,
   type NoiseMode,
   type HoldMode,
@@ -53,10 +58,14 @@ import {
   type HostDevice,
   type GoldenRecord,
   type FitResult,
-} from "./protocol";
+} from "./protocol.ts";
 
 export interface DeviceState {
   model?: string;
+  /** Set once the product id is known and has a profile. */
+  profile?: ModelProfile;
+  /** Set for a product id with no profile: the session is read-only. */
+  unsupported?: UnsupportedInfo & { report: string };
   battery?: Partial<Record<Side, BatteryLevel>>;
   wearing?: Partial<Record<Side, WearState>>;
   firmware?: string;
@@ -116,7 +125,8 @@ const READS = {
   eq: [0x010f, [], byte],
   customPresets: [0x0122, [], customPresets],
   gestures: [0x0108, [], gestures],
-  features: [0x010d, [9, 5, 4, 11, 17, 24, 6, 27, 29, 28], featureStates],
+  // The payload is built from the model's profile (BudsSession.featurePayload).
+  features: [0x010d, [], featureStates],
   devices: [0x0112, [], connectedDevices],
   codec: [0x0114, [], byte],
   bass: [0x0124, [], bassLevel],
@@ -147,6 +157,9 @@ export class BudsSession {
   private generation = 0;
   private closing: Promise<void> | null = null;
   private caps: Capabilities | null = null;
+  private writeChain: Promise<unknown> = Promise.resolve();
+  // The allow-list in force. Identity reads only, until the product id has a profile.
+  profile: ModelProfile = PROBE_PROFILE;
   private batteryTimer?: ReturnType<typeof setTimeout>;
   private expectDrop = false;
   private listeners = new Set<() => void>();
@@ -180,8 +193,12 @@ export class BudsSession {
   private setState(patch: Partial<DeviceState>) {
     this.publish({ state: { ...this.state, ...patch, updatedAt: new Date().toISOString() } });
   }
+  // Offered by the earbuds' bitmap and allowed by the model's profile.
   supports(command: number) {
-    return !!this.caps?.supports(command);
+    return !!this.caps?.supports(command) && this.profile.commands.has(command);
+  }
+  private get featurePayload() {
+    return [this.profile.featureQuery.length, ...this.profile.featureQuery];
   }
 
   // A port this origin was already granted; opening it needs no click.
@@ -244,6 +261,7 @@ export class BudsSession {
     // From here on any failure must close the port, or the tab keeps the channel while showing "Connecting".
     try {
       this.connected = true;
+      this.profile = PROBE_PROFILE;
       this.snapshot = { ...this.snapshot, live: false, state: { errors: {} } };
       const generation = ++this.generation;
       const reader = (this.reader = port.readable.getReader());
@@ -274,8 +292,16 @@ export class BudsSession {
       const model = (identity[1] | (identity[2] << 8) | (identity[3] << 16))
         .toString(16)
         .padStart(6, "0");
-      if (model !== MODEL) throw Error("This app supports OnePlus Buds 4 only.");
-      this.setState({ model });
+      const profile = profileFor(model);
+      if (!profile) {
+        // No profile, no writes: read the identity and show a report the owner can send us.
+        this.setState({ model });
+        await this.diagnose(model);
+        this.publish({ connection: "connected" });
+        return;
+      }
+      this.profile = profile;
+      this.setState({ model, profile });
       await this.refresh();
       try {
         await this.subscribeEvents();
@@ -287,6 +313,30 @@ export class BudsSession {
       await this.close((error as Error).message);
       throw error;
     }
+  }
+  // Replies only from the identity allow-list (PROBE_PROFILE); a failed read just leaves a gap.
+  private async diagnose(model: string) {
+    const info: UnsupportedInfo = { productId: model, bitmap: this.caps?.bitmap ?? [] };
+    const ask = async (command: number, payload: Bytes = []) => {
+      try {
+        return await this.query(command, payload);
+      } catch (error) {
+        this.log("query_error", { command: hex(command), message: (error as Error).message });
+        return undefined;
+      }
+    };
+    const fw = await ask(0x0105);
+    try {
+      if (fw) info.firmware = firmware(fw);
+    } catch {
+      /* unrecognized firmware record */
+    }
+    info.offeredEvents = (await ask(0x0200))?.slice(2);
+    info.features = await ask(0x010d, this.featurePayload);
+    this.setState({
+      firmware: info.firmware,
+      unsupported: { ...info, report: diagnosticsReport(info) },
+    });
   }
   async close(reason = "Disconnected.") {
     if (this.closing) return this.closing;
@@ -340,12 +390,40 @@ export class BudsSession {
         return;
       } catch (error) {
         last = error as Error;
-        if (/Buds 4 only/.test(last.message)) throw last;
       }
     }
     throw Error(
       `The earbuds did not come back (${last?.message ?? "timeout"}). Connect again when they are ready.`,
     );
+  }
+  // One writer at a time: a request and our answer to a request from the buds must not interleave.
+  private writeBytes(bytes: Uint8Array) {
+    const write = this.writeChain
+      .catch(() => {})
+      .then(async () => {
+        const writer = this.port!.writable.getWriter();
+        try {
+          await writer.write(bytes);
+        } finally {
+          writer.releaseLock();
+        }
+      });
+    this.writeChain = write;
+    return write;
+  }
+  private async answerTime(sequence: number) {
+    try {
+      const reply = encode(
+        this.profile,
+        0x8500,
+        sequence,
+        timePayload(Math.floor(Date.now() / 1000)),
+      );
+      await this.writeBytes(reply);
+      this.log("answered_time_request", { sequence });
+    } catch (error) {
+      this.log("time_answer_error", { message: (error as Error).message });
+    }
   }
   query(command: number, payload: Bytes = [], timeout = 3500): Promise<Bytes> {
     const generation = this.generation;
@@ -355,7 +433,7 @@ export class BudsSession {
         if (!this.connected || generation !== this.generation) throw Error("Session changed");
         const sequence = this.sequence;
         this.sequence = sequence === 254 ? 1 : sequence + 1;
-        const bytes = encode(command, sequence, payload),
+        const bytes = encode(this.profile, command, sequence, payload),
           key = `${command | 0x8000}:${sequence}`;
         let timer: ReturnType<typeof setTimeout> | undefined;
         const answer = new Promise<Bytes>((resolve, reject) => {
@@ -364,12 +442,7 @@ export class BudsSession {
         });
         answer.catch(() => {});
         try {
-          const writer = this.port!.writable.getWriter();
-          try {
-            await writer.write(bytes);
-          } finally {
-            writer.releaseLock();
-          }
+          await this.writeBytes(bytes);
           this.log("request", { command: hex(command), sequence, payload });
           return await answer;
         } finally {
@@ -390,7 +463,13 @@ export class BudsSession {
     }
     const p = frame.payload,
       state = this.state;
-    if (state.model !== MODEL) return;
+    // The buds drop the link if this goes unanswered (Nord Buds 3 Pro, QuickBuds docs/PROTOCOL.md:474-477 [CAPTURE]), so every model gets it.
+    if (frame.command === 0x0500) {
+      void this.answerTime(frame.sequence);
+      return;
+    }
+    const profile = state.profile;
+    if (!profile) return;
     let patch: Partial<DeviceState> | undefined;
     if (frame.command === 0x0204) {
       const sub = p.slice(1),
@@ -424,7 +503,7 @@ export class BudsSession {
         } catch {
           /* malformed */
         }
-      if (p[0] === 3 && p[1] === 2 && p[2] === 1)
+      if (profile.holdModes.length && p[0] === 3 && p[1] === 2 && p[2] === 1)
         try {
           patch = { holdCycle: holdCycle(withStatus) };
         } catch {
@@ -440,7 +519,7 @@ export class BudsSession {
         patch = { fit: fitResult(sub) };
         this.resolveWaiters("fit", patch.fit);
       }
-      if (p[0] === 5 && p.length === 2)
+      if (p[0] === 5 && p.length === 2 && profile.switchesReadable.includes(SWITCHES.gameMode))
         patch = { features: { ...state.features, [SWITCHES.gameMode]: p[1] } };
       if (p[0] === 8 && p.length >= 3) {
         patch = { hearingStatus: { kind: p[1], status: p[2] } };
@@ -480,8 +559,10 @@ export class BudsSession {
   }
 
   async read(field: Field) {
-    const [command, payload, decoder] = READS[field];
-    if (!this.supports(command)) return;
+    const [command, fixed, decoder] = READS[field];
+    const payload = field === "features" ? this.featurePayload : fixed;
+    // The model's allow-list decides, not just the bitmap: e.g. no hold-cycle read on a model without one.
+    if (!this.supports(command) || !this.profile.commands.get(command)?.([...payload])) return;
     const errors = { ...this.state.errors };
     try {
       const value = decoder(await this.query(command, [...payload]));
@@ -541,6 +622,8 @@ export class BudsSession {
     this.log("write_verified", { name, field });
   }
   async setNoise(mode: NoiseMode) {
+    if (!this.profile.noiseModes.includes(mode))
+      throw Error(`${this.profile.displayName} does not offer this noise mode.`);
     await this.change(
       `Noise mode ${mode}`,
       0x0404,
@@ -551,6 +634,8 @@ export class BudsSession {
     if (mode === "smart" || mode === "anc") await this.read("smartLevel");
   }
   async setHoldCycle(modes: HoldMode[]) {
+    if (!this.profile.holdModes.length)
+      throw Error(`${this.profile.displayName} has no touch-and-hold cycle here.`);
     if (!modes.length) throw Error("Touch and hold needs at least one mode.");
     const mask = holdCycleMask(modes);
     await this.change(
@@ -562,6 +647,8 @@ export class BudsSession {
     );
   }
   async setSwitch(id: number, on: boolean, name = `Switch ${id}`) {
+    if (!this.profile.switchesWritable.includes(id))
+      throw Error(`${name} can’t be changed from here on ${this.profile.displayName}.`);
     await this.change(
       `${name} ${on ? "on" : "off"}`,
       0x0403,
@@ -616,7 +703,7 @@ export class BudsSession {
     await this.change(
       `${side} gesture ${action}`,
       0x0401,
-      gestureTablePayload(table, side, action, fn),
+      gestureTablePayload(this.profile, table, side, action, fn),
       "gestures",
       (v) => {
         const slots =
@@ -629,7 +716,7 @@ export class BudsSession {
     await this.change(
       `Call gesture ${action}`,
       0x0401,
-      callGesturePayload(action, fn),
+      callGesturePayload(this.profile, action, fn),
       "gestures",
       (v) => {
         const slots = v?.filter((e) => e.button === 6 && e.action === action) ?? [];
@@ -637,8 +724,12 @@ export class BudsSession {
       },
     );
   }
-  setEq(id: number) {
-    return this.change(`Equalizer ${id}`, 0x0406, [id], "eq", (v) => v === id);
+  async setEq(id: number) {
+    const known =
+      this.profile.eqPresets.some((p) => p.id === id) ||
+      !!this.state.customPresets?.some((p) => p.id === id);
+    if (!known) throw Error(`${this.profile.displayName} has no equalizer preset ${id}.`);
+    await this.change(`Equalizer ${id}`, 0x0406, [id], "eq", (v) => v === id);
   }
   async createPreset(name: string, bands: Band[]) {
     if ((this.state.customPresets?.length ?? 0) >= EQ_MAX_CUSTOM)

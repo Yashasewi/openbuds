@@ -26,6 +26,12 @@ jobs:
           DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
         run: swift build -c release --product OpenBuds
 
+      - name: Test
+        working-directory: native
+        env:
+          DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+        run: swift test
+
   web:
     name: Web app
     runs-on: ubuntu-latest
@@ -58,3 +64,7 @@ jobs:
           - name: Build
             working-directory: app
             run: pnpm run build
+
+          - name: Test
+            working-directory: app
+            run: pnpm test
