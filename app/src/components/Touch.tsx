@@ -1,12 +1,5 @@
 import { useState } from "react";
-import {
-  ACTIONS,
-  CALL_MENUS,
-  FUNCTIONS,
-  GESTURE_MENUS,
-  type Ear,
-  type HoldMode,
-} from "../lib/protocol";
+import { ACTIONS, FUNCTIONS, type Ear, type HoldMode } from "../lib/protocol";
 import { run, session, useAction, useBuds } from "../lib/store";
 import { Group, Row, Segmented, Select, Status, cx } from "./ui";
 
@@ -28,7 +21,7 @@ export function Touch() {
     (action) =>
       [action, table.find((g) => g.side === ear && g.button !== 6 && g.action === action)] as const,
   ).filter(([, slot]) => slot);
-  const calls = Object.keys(CALL_MENUS)
+  const calls = Object.keys(state.profile?.callMenus ?? {})
     .map(Number)
     .map((action) => [action, table.find((g) => g.button === 6 && g.action === action)] as const)
     .filter(([, slot]) => slot);
@@ -88,24 +81,26 @@ function GestureRow({ ear, action, fn }: { ear: Ear; action: number; fn: number 
         <Select
           label={`${ear} earbud ${ACTIONS[action]}`}
           value={fn}
-          options={options(GESTURE_MENUS[action])}
+          options={options(state.profile?.gestureMenus[action] ?? [])}
           disabled={busy}
           onChange={(v) => run(key, () => session.setGesture(ear, action, v))}
         />
       }
     >
-      {action === 4 && fn === 8 && state.holdCycle && <HoldCycle modes={state.holdCycle.modes} />}
+      {action === 4 && fn === 8 && state.holdCycle && state.profile?.holdModes.length && (
+        <HoldCycle modes={state.holdCycle.modes} offered={state.profile.holdModes} />
+      )}
     </Row>
   );
 }
 
-function HoldCycle({ modes }: { modes: HoldMode[] }) {
+function HoldCycle({ modes, offered }: { modes: HoldMode[]; offered: readonly HoldMode[] }) {
   const { busy, status } = useAction("holdCycle");
   return (
     <div className="mt-3.5">
       <p className="text-[0.85rem] text-ink/60">Modes to cycle through, on both earbuds</p>
       <div className="mt-2 flex flex-wrap gap-2">
-        {HOLD_MODES.map(({ mode, label }) => {
+        {HOLD_MODES.filter(({ mode }) => offered.includes(mode)).map(({ mode, label }) => {
           const on = modes.includes(mode),
             last = on && modes.length === 1;
           return (
@@ -159,6 +154,7 @@ function HoldCycle({ modes }: { modes: HoldMode[] }) {
 function CallRow({ action, fn }: { action: number; fn: number }) {
   const key = `call-${action}`;
   const { busy, status } = useAction(key);
+  const { state } = useBuds();
   return (
     <Row
       title={ACTIONS[action]}
@@ -167,7 +163,7 @@ function CallRow({ action, fn }: { action: number; fn: number }) {
         <Select
           label={`During calls, ${ACTIONS[action]}`}
           value={fn}
-          options={options(CALL_MENUS[action])}
+          options={options(state.profile?.callMenus[action] ?? [])}
           disabled={busy}
           onChange={(v) => run(key, () => session.setCallGesture(action, v))}
         />

@@ -15,6 +15,10 @@ public final class BudsSession {
   }
 
   public private(set) var connection: Connection = .searching
+  /// The allow-list in force: identity reads only until the product id has a profile (`ModelProfile.probe`).
+  public private(set) var profile: ModelProfile = .probe
+  /// Set for a product id with no profile; the session is then read-only.
+  public private(set) var unsupported: UnsupportedInfo?
   public private(set) var battery: [Part: BatteryLevel] = [:]
   public private(set) var wearing: [Part: WearState] = [:]
   public private(set) var firmware: String?
@@ -45,9 +49,10 @@ public final class BudsSession {
   public private(set) var status: [String: ChangeStatus] = [:]
 
   public var isConnected: Bool { if case .connected = connection { true } else { false } }
-  public var presets: [Preset] { Preset.builtIn + customPresets }
+  public var presets: [Preset] { profile.eqPresets + (profile.customEq ? customPresets : []) }
   public func isOn(_ s: Switch) -> Bool? { features[s.rawValue].map { $0 == 1 } }
-  public func supports(_ command: UInt16) -> Bool { caps?.supports(command) ?? false }
+  /// Offered by the earbuds' bitmap and allowed by the model's profile.
+  public func supports(_ command: UInt16) -> Bool { (caps?.supports(command) ?? false) && profile.allows(command: command) }
   /// Hi-Res needs LHDC on this link; macOS only offers SBC and AAC.
   public var hiResAvailable: Bool { codec == 7 || codec == 8 }
   /// Lowest earbud level, for the menu-bar icon.
@@ -105,12 +110,12 @@ public final class BudsSession {
     guard !isConnected, !connecting, !userDisconnected else { return }
     retryTimer?.cancel()
     guard let target = RFCOMMLink.candidates().first(where: { $0.isConnected() }) else {
-      connection = .unavailable("Connect your OnePlus Buds 4 to this Mac in Bluetooth settings.")
+      connection = .unavailable("Connect your OnePlus earbuds to this Mac in Bluetooth settings.")
       return
     }
     connecting = true
     defer { connecting = false }
-    let name = target.name ?? "OnePlus Buds 4"
+    let name = target.name ?? "OnePlus earbuds"
     if !retrying { connection = .connecting(name) }
     lastError = nil
     do {
@@ -119,9 +124,17 @@ public final class BudsSession {
       device = target
       watcher.watchDisconnect(of: target)
       framer = Framer()
+      profile = .probe
+      unsupported = nil
       caps = try decodeCapabilities(try await query(0x0100))
       let model = try decodeModel(try await query(0x0103))
-      guard model == budsModel else { throw BudsError.unrecognized("model \(model); this app supports OnePlus Buds 4 only") }
+      guard let known = ModelProfile.profile(for: model) else {
+        // No profile, no writes: read the identity and show a report the owner can send us.
+        await diagnose(model: model, bitmap: caps?.bitmap ?? [])
+        connection = .connected(name)
+        return
+      }
+      profile = known
       connection = .connected(name)
       await refresh()
       try? await subscribeEvents()
@@ -133,6 +146,16 @@ public final class BudsSession {
       // and nothing else would prompt another attempt.
       if (error as? GATTError)?.retries == true { scheduleRetry() }
     }
+  }
+
+  /// Replies from the identity allow-list only; a failed read just leaves a gap.
+  private func diagnose(model: String, bitmap: Bytes) async {
+    var info = UnsupportedInfo(productId: model, bitmap: bitmap)
+    if let p = try? await query(0x0105) { info.firmware = try? decodeFirmware(p) }
+    if let p = try? await query(0x0200), p.count > 2 { info.offeredEvents = Array(p[2...]) }
+    info.features = try? await query(0x010D, profile.featurePayload)
+    firmware = info.firmware
+    unsupported = info
   }
 
   private func scheduleRetry() {
@@ -185,7 +208,7 @@ public final class BudsSession {
     defer { unlock() }
     let seq = sequence
     sequence = seq == 254 ? 1 : seq + 1
-    let bytes = try encode(command, seq, payload)
+    let bytes = try encode(command, seq, payload, for: profile)
     let key = UInt32(command | 0x8000) << 8 | UInt32(seq)
     let reply = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bytes, Error>) in
       pending[key] = continuation
@@ -210,15 +233,16 @@ public final class BudsSession {
     if let p = try? await query(0x0106), (try? requireSuccess(p, 2)) != nil, let b = decodeBattery(p, status: true) { battery = b }
     if supports(0x0105), let v = try? decodeFirmware(try await query(0x0105)) { firmware = v }
     if supports(0x0109), let p = try? await query(0x0109), let w = decodeWearing(p) { wearing = w }
+    // The model's allow-list decides, not just the bitmap: e.g. no hold-cycle read on a model without one.
     if supports(0x010C) {
-      if let v = try? decodeNoise(try await query(0x010C, [1, 1])) { noise = v }
-      if let v = try? decodeSmartLevel(try await query(0x010C, [4, 1])) { smartLevel = v }
-      if let v = try? decodeHoldCycle(try await query(0x010C, [2, 1])) { holdCycle = v }
+      if profile.allows(0x010C, [1, 1]), let v = try? decodeNoise(try await query(0x010C, [1, 1])) { noise = v }
+      if profile.allows(0x010C, [4, 1]), let v = try? decodeSmartLevel(try await query(0x010C, [4, 1])) { smartLevel = v }
+      if profile.allows(0x010C, [2, 1]), let v = try? decodeHoldCycle(try await query(0x010C, [2, 1])) { holdCycle = v }
     }
     if supports(0x010F), let v = try? decodeByte(try await query(0x010F)) { eq = v }
     if supports(0x0122), let v = try? decodeCustomPresets(try await query(0x0122)) { customPresets = v }
     if supports(0x0108), let v = try? decodeGestures(try await query(0x0108)) { gestures = v }
-    if let v = try? decodeFeatures(try await query(0x010D, [UInt8(featureQuery.count)] + featureQuery)) { features = v }
+    if let v = try? decodeFeatures(try await query(0x010D, profile.featurePayload)) { features = v }
     if supports(0x0112), let v = try? decodeDevices(try await query(0x0112)) { devices = v }
     if supports(0x0114), let v = try? decodeByte(try await query(0x0114)) { codec = v }
     if supports(0x0124), let v = try? decodeBass(try await query(0x0124)) { bass = v }
@@ -253,6 +277,14 @@ public final class BudsSession {
       return
     }
     let p = frame.payload
+    // The buds drop the link if this goes unanswered (Nord Buds 3 Pro, QuickBuds docs/PROTOCOL.md:474-477 [CAPTURE]), so every model gets it.
+    if frame.command == 0x0500 {
+      // The buds ask for the time; the phone answers 00 <unix seconds u32 LE> (QuickBuds docs/PROTOCOL.md:483, [CAPTURE]).
+      let now = UInt32(Date().timeIntervalSince1970)
+      if let bytes = try? encode(0x8500, frame.sequence, timePayload(now), for: profile) { try? link.write(bytes) }
+      return
+    }
+    guard profile.isKnown else { return }
     switch frame.command {
     case 0x0204 where p.first == 1:
       if let b = decodeBattery(Array(p.dropFirst()), status: false) { battery.merge(b) { $1 } }
@@ -266,23 +298,19 @@ public final class BudsSession {
       let status: Bytes = [0] + p.dropFirst()
       if p[1] == 1, p[2] == 1, let v = try? decodeNoise(status) { noise = v }
       if p[1] == 4, p[2] == 1, let v = try? decodeSmartLevel(status) { smartLevel = v }
-      if p[1] == 2, p[2] == 1, let v = try? decodeHoldCycle(status) { holdCycle = v }
+      if !profile.holdModes.isEmpty, p[1] == 2, p[2] == 1, let v = try? decodeHoldCycle(status) { holdCycle = v }
     case 0x0204 where p.first == 4:
       let result = decodeFit(Array(p.dropFirst()))
       fit = result
       fitWaiter?.resume(returning: result)
       fitWaiter = nil
-    case 0x0204 where p.first == 5 && p.count == 2:
+    case 0x0204 where p.first == 5 && p.count == 2 && profile.switchesReadable.contains(Switch.gameMode.rawValue):
       features[Switch.gameMode.rawValue] = p[1]
     case 0x0204 where p.first == 8 && p.count >= 3:
       hearingNote = [5: "An earbud is out of your ear. Put it back to continue.", 6: "Earbud back in. Continue.",
         7: "The test timed out. Cancel and start again."][Int(p[2])]
     case 0x0504 where p.count == 1:
       eq = Int(p[0])
-    case 0x0500:
-      // The buds ask for the time; the phone answers 00 <unix seconds u32 LE> (QuickBuds docs/PROTOCOL.md:483, [CAPTURE]).
-      let now = UInt32(Date().timeIntervalSince1970)
-      if let bytes = try? encode(0x8500, frame.sequence, [0] + (0..<4).map { UInt8(now >> (8 * $0) & 0xFF) }) { try? link.write(bytes) }
     default:
       break
     }
@@ -348,7 +376,7 @@ public final class BudsSession {
   }
 
   private func rereadFeatures() async throws -> [UInt8: UInt8] {
-    let value = try decodeFeatures(try await query(0x010D, [UInt8(featureQuery.count)] + featureQuery))
+    let value = try decodeFeatures(try await query(0x010D, profile.featurePayload))
     features = value
     return value
   }
@@ -365,6 +393,7 @@ public final class BudsSession {
 
   public func setNoise(_ mode: NoiseMode) async {
     await run("noise") {
+      guard profile.noiseModes.contains(mode) else { throw BudsError.notOffered("\(mode.rawValue.capitalized) on \(profile.displayName)") }
       try await write("Noise control", 0x0404, noisePayload(mode)) {
         let state = try decodeNoise(try await query(0x010C, [1, 1]))
         noise = state
@@ -376,6 +405,7 @@ public final class BudsSession {
 
   public func setEq(_ id: Int) async {
     await run("eq") {
+      guard presets.contains(where: { $0.id == id }) else { throw BudsError.notOffered("Equalizer preset \(id)") }
       try await write("Equalizer", 0x0406, [UInt8(id)]) {
         let value = try decodeByte(try await query(0x010F))
         eq = value
@@ -386,6 +416,7 @@ public final class BudsSession {
 
   public func setSwitch(_ s: Switch, _ on: Bool) async {
     await run("switch-\(s.rawValue)") {
+      guard profile.switchesWritable.contains(s.rawValue) else { throw BudsError.notOffered("Changing \(s.title) on \(profile.displayName)") }
       if s == .hiRes, !hiResAvailable {
         throw BudsError.notOffered("Hi-Res audio over \(codec.flatMap { codecNames[$0] } ?? "this codec")")
       }
@@ -400,6 +431,7 @@ public final class BudsSession {
 
   public func setHoldCycle(_ modes: Set<HoldMode>) async {
     await run("holdCycle") {
+      guard !profile.holdModes.isEmpty else { throw BudsError.notOffered("Touch-and-hold cycle on \(profile.displayName)") }
       guard !modes.isEmpty else { throw BudsError.notOffered("An empty touch-and-hold cycle") }
       try await write("Touch-and-hold cycle", 0x0404, holdCyclePayload(modes)) {
         let value = try decodeHoldCycle(try await query(0x010C, [2, 1]))
@@ -412,7 +444,7 @@ public final class BudsSession {
   public func setGesture(_ ear: Ear, action: UInt8, function: UInt8) async {
     await run("gesture-\(ear.rawValue)-\(action)") {
       try await write("\(ear.title) \(Gestures.actions[action] ?? "gesture")", 0x0401,
-        try gestureTablePayload(gestures, ear: ear, action: action, function: function)) {
+        try gestureTablePayload(profile, gestures, ear: ear, action: action, function: function)) {
         let slots = try await rereadGestures().filter { $0.device == ear.rawValue && $0.action == action && $0.button != 6 }
         return !slots.isEmpty && slots.allSatisfy { $0.function == function }
       }
@@ -421,7 +453,7 @@ public final class BudsSession {
 
   public func setCallGesture(action: UInt8, function: UInt8) async {
     await run("call-\(action)") {
-      try await write("Call control", 0x0401, try callGesturePayload(action: action, function: function)) {
+      try await write("Call control", 0x0401, try callGesturePayload(profile, action: action, function: function)) {
         let slots = try await rereadGestures().filter { $0.button == 6 && $0.action == action }
         return !slots.isEmpty && slots.allSatisfy { $0.function == function }
       }

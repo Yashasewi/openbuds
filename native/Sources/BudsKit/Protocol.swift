@@ -7,7 +7,6 @@ public typealias Bytes = [UInt8]
 public let budsServiceUUID: Bytes = [
   0x00, 0x00, 0x07, 0x9A, 0xD1, 0x02, 0x11, 0xE1, 0x9B, 0x23, 0x00, 0x02, 0x5B, 0x00, 0xA5, 0xA5,
 ]
-public let budsModel = "065414"
 
 public enum BudsError: LocalizedError, Equatable {
   case notAllowed(UInt16)
@@ -47,7 +46,7 @@ func minimalLE(_ value: Int) -> Bytes {
 
 public enum NoiseMode: String, CaseIterable, Sendable {
   case off, anc, transparency, deep, medium, light, smart, adaptive
-  // Buds 4 SET bits for 0x0404 01 01; reports use NOISE_REPORTS.
+  // SET bits for 0x0404 01 01 (same on Buds 4 and Buds 3); reports use `reports`.
   var setBit: Int {
     switch self {
     case .off: 0
@@ -104,37 +103,11 @@ func decodeSmartLevel(_ p: Bytes) throws -> NoiseMode? {
 
 // MARK: Allowlist and framing
 
-// Every command and payload shape this client may send. Writes outside it are rejected before encoding.
-// Firmware/OTA, resets, pairing, ear scans, cloud features and anything undocumented for Buds 4 are absent.
-private let allowed: [UInt16: @Sendable (Bytes) -> Bool] = [
-  0x0100: \.isEmpty, 0x0103: \.isEmpty, 0x0105: \.isEmpty, 0x0106: \.isEmpty, 0x0108: \.isEmpty, 0x0109: \.isEmpty,
-  0x010F: \.isEmpty, 0x0112: \.isEmpty, 0x0114: \.isEmpty, 0x0115: \.isEmpty, 0x0122: \.isEmpty, 0x0124: \.isEmpty,
-  0x0130: \.isEmpty, 0x0200: \.isEmpty,
-  0x010C: { $0.count == 2 && [1, 2, 4].contains($0[0]) && $0[1] == 1 },
-  0x010D: { $0.count > 1 && Int($0[0]) == $0.count - 1 },
-  0x0116: { $0.count == 41 && $0[0] == 12 && validHearingInfo(Array($0[1..<37])) },
-  0x0205: { p in
-    p.count >= 2 && Int(p[0]) == p.count - 1 && p.dropFirst().allSatisfy { [1, 2, 3, 4, 8].contains($0) }
-      && Set(p.dropFirst()).count == p.count - 1
-  },
-  0x0400: { $0 == [0] || $0 == [1] },
-  0x0401: validGestureTable,
-  0x0403: { $0.count == 2 && Switch.allIDs.contains($0[0]) && $0[1] <= 1 },
-  0x0404: { p in NoiseMode.allCases.contains { noisePayload($0) == p } || validHoldCycle(p) },
-  0x0405: { $0 == [0] || $0 == [1] },
-  0x0406: { $0.count == 1 && $0[0] <= 15 },
-  0x040D: { $0 == [2, 0] || $0 == [2, 1] },
-  0x040E: { $0 == [4] || validTone($0) || validRecord($0) },
-  0x0411: { $0.count == 5 && Array($0[0..<4]) == [1, 1, 1, 0] && $0[4] > 0 },
-  0x0413: { $0 == [8, 0, 0] || $0 == [8, 0, 1] },
-  0x0418: validCustomEq,
-  0x041B: { $0.count == 3 && $0[0] == 0xFB && $0[1] == 5 && abs(signed($0[2])) <= 5 },
-  0x0427: { $0.count == 1 && (1...10).contains($0[0]) },
-  0x8500: { $0.count == 5 && $0[0] == 0 },
-]
+// MARK: Framing
 
-public func encode(_ command: UInt16, _ sequence: UInt8, _ payload: Bytes = []) throws -> Bytes {
-  guard let valid = allowed[command], valid(payload), (1...254).contains(sequence) || command == 0x8500 else {
+public func encode(_ command: UInt16, _ sequence: UInt8, _ payload: Bytes = [], for profile: ModelProfile) throws -> Bytes {
+  // Answers to the buds' own requests (0x8500) echo whatever sequence they used.
+  guard profile.allows(command, payload), (1...254).contains(sequence) || command == 0x8500 else {
     throw BudsError.notAllowed(command)
   }
   var size = 7 + payload.count
@@ -217,6 +190,8 @@ private let always: Set<UInt16> = [0x0100, 0x0101, 0x0102, 0x0103, 0x0104, 0x010
 
 public struct Capabilities: Sendable {
   let offered: Set<UInt16>
+  /// The raw 0x8100 bitmap bytes (after the status byte), for diagnostics.
+  public let bitmap: Bytes
   public func supports(_ command: UInt16) -> Bool { offered.contains(command) }
 }
 
@@ -226,7 +201,7 @@ func decodeCapabilities(_ p: Bytes) throws -> Capabilities {
   for (bit, commands) in bitCommands.enumerated() where bit < (p.count - 1) * 8 && (p[1 + bit >> 3] >> (bit & 7)) & 1 == 1 {
     offered.formUnion(commands)
   }
-  return Capabilities(offered: offered)
+  return Capabilities(offered: offered, bitmap: Array(p[1...]))
 }
 
 // MARK: Battery and wearing
@@ -320,7 +295,7 @@ public struct Preset: Identifiable, Equatable, Sendable {
   public var bands: [Band]
   public var isCustom: Bool { !bands.isEmpty }
   public init(id: Int, name: String, bands: [Band] = []) { self.id = id; self.name = name; self.bands = bands }
-  public static let builtIn = [Preset(id: 0, name: "Balanced"), Preset(id: 1, name: "Serenade"), Preset(id: 2, name: "Bass")]
+  // Built-in presets belong to the model: ModelProfile.eqPresets.
 }
 
 func decodeCustomPresets(_ p: Bytes) throws -> [Preset] {

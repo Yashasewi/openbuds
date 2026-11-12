@@ -18,5 +18,10 @@ let package = Package(
       dependencies: ["BudsKit"],
       path: "Sources/OpenBuds"
     ),
+    .testTarget(
+      name: "BudsKitTests",
+      dependencies: ["BudsKit"],
+      path: "Tests/BudsKitTests"
+    ),
   ]
 )

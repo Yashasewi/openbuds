@@ -5,7 +5,7 @@
 <h1 align="center">OpenBuds</h1>
 
 <p align="center">
-  Every setting on your <b>OnePlus Buds 4</b>, from a Mac menu bar app or a Chrome tab.<br>
+  Every setting on your <b>OnePlus Buds 4</b> (and, experimentally, <b>Buds 3</b>), from a Mac menu bar app or a Chrome tab.<br>
   Free and open source. No account, no cloud, no phone.
 </p>
 
@@ -72,7 +72,7 @@ Only one app can hold the earbuds' control link. Quit HeyMelody, and close any C
 
 ## Use the web app
 
-Open **[openbuds.yashasewi.me](https://openbuds.yashasewi.me)** in desktop Google Chrome, click **Connect earbuds**, and choose **OnePlus Buds 4**. The earbuds must already be paired with your computer. Chrome talks to them over Web Serial, which other browsers don't support yet.
+Open **[openbuds.yashasewi.me](https://openbuds.yashasewi.me)** in desktop Google Chrome, click **Connect earbuds**, and choose your OnePlus earbuds. The earbuds must already be paired with your computer. Chrome talks to them over Web Serial, which other browsers don't support yet.
 
 ## Build from source
 
@@ -96,9 +96,19 @@ pnpm dev
 
 Then open [localhost:5173](http://localhost:5173/) in Chrome. Use `localhost`, not `127.0.0.1`: Chrome remembers the earbuds per address.
 
+## Supported earbuds
+
+| Earbuds | Status | Tested firmware |
+|---|---|---|
+| OnePlus Buds 4 (`065414`) | Supported | 138.138.105 |
+| OnePlus Buds 3 (`063C14`) | **Experimental**: noise control (no Adaptive), 4 EQ presets (names not confirmed), game mode and wear detection, touch gestures, battery and wear. No hold cycle, custom EQ or tools. Dual connection is shown but can't be changed here | 127.127.101 |
+| Anything else | Read-only: OpenBuds shows the model and firmware and a **Copy diagnostics** button, and sends nothing else | |
+
+Buds 3 support rests on one owner capture over RFCOMM (the web app's route). The Mac app reaches the earbuds over GATT, which has not been exchanged with a Buds 3 yet, so it may not connect. See [PROTOCOL.md](PROTOCOL.md#per-model-differences). If you own a Buds 3 or another model, a report from the Copy diagnostics button helps.
+
 ## Limits
 
-- OnePlus Buds 4 only, tested on firmware 138.138.105.
+- Only the earbuds above. Firmware outside the tested versions may behave differently.
 - Hi-Res audio needs the LHDC codec. macOS connects with AAC, so the earbuds refuse Hi-Res on a Mac.
 - Firmware updates, factory reset, pairing, and HeyMelody's cloud features are not implemented.
 
@@ -114,6 +124,9 @@ Bug reports and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.m
 
 - [QuickBuds](https://github.com/spizganed/QuickBuds) by spizganed, GPL-3.0-or-later. The command bitmap is based on `desktop/src/types.rs`, with some entries changed.
 - [OppoPodsManager](https://github.com/Zhaoyi-ya/OppoPodsManager), GPL-3.0-or-later. An earlier protocol write-up.
+- Himanshu Singh ([OneBuds](https://github.com/himanshudev28/OneBuds)), for the Buds 3 captures behind the Buds 3 profile. Facts only; OneBuds has no licence and none of its code is used.
+- [Osilvfe](https://github.com/Osilvfe/dots-hyprland)'s `oplus-buds3-bridge.rs` (GPL-3.0), as a reference for the Buds 3 command layout.
+- Pratyaksh ([@pratyakshmm](https://x.com/pratyakshmm)), for showing Buds 3 control on macOS.
 - [Pods-Protocol](https://github.com/Star-ZER0/Pods-Protocol-Reverse-Engineering), CC-BY-SA-4.0. A format reference.
 - [Geologica](https://fonts.google.com/specimen/Geologica), through `@fontsource-variable/geologica`.
 

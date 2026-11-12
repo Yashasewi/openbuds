@@ -10,11 +10,13 @@ struct SwitchRow: View {
 
   var body: some View {
     if session.isOn(item) != nil {
+      // Readable but not writable for this model (e.g. dual connection on Buds 3): shown, never sent.
+      let readOnly = !session.profile.switchesWritable.contains(item.rawValue)
       ToggleRow(
         title: item.title,
-        subtitle: unavailable ?? description,
+        subtitle: unavailable ?? (readOnly ? [description, "Change it from your phone."].compactMap { $0 }.joined(separator: " ") : description),
         isOn: Binding(get: { session.isOn(item) ?? false }, set: { on in Task { await session.setSwitch(item, on) } }),
-        disabled: session.busy || (unavailable != nil && session.isOn(item) != true)
+        disabled: session.busy || readOnly || (unavailable != nil && session.isOn(item) != true)
       )
       StatusLine(session: session, key: "switch-\(item.rawValue)")
     }
@@ -242,14 +244,14 @@ struct ControlsPage: View {
       .id(ear)
       .transition(.opacity)
       .animation(.snappy(duration: 0.15), value: ear)
-      let calls = Gestures.callMenus.keys.sorted().filter { action in
+      let calls = session.profile.callMenus.keys.sorted().filter { action in
         session.gestures.contains { $0.button == 6 && $0.action == action }
       }
       if !calls.isEmpty {
         PanelSection(title: "During calls") {
           ForEach(calls, id: \.self) { action in
             let current = session.gestures.first { $0.button == 6 && $0.action == action }?.function
-            menuRow(action, call: true, menu: Gestures.callMenus[action] ?? [], current: current) { fn in
+            menuRow(action, call: true, menu: session.profile.callMenus[action] ?? [], current: current) { fn in
               Task { await session.setCallGesture(action: action, function: fn) }
             }
             StatusLine(session: session, key: "call-\(action)")
@@ -266,11 +268,11 @@ struct ControlsPage: View {
   @ViewBuilder
   private func gestureRow(_ ear: Ear, _ action: UInt8) -> some View {
     let current = slot(ear, action)?.function
-    menuRow(action, call: false, menu: Gestures.menus[action] ?? [], current: current) { fn in
+    menuRow(action, call: false, menu: session.profile.gestureMenus[action] ?? [], current: current) { fn in
       Task { await session.setGesture(ear, action: action, function: fn) }
     }
     StatusLine(session: session, key: "gesture-\(ear.rawValue)-\(action)")
-    if action == 4, current == 8, let modes = session.holdCycle {
+    if action == 4, current == 8, !session.profile.holdModes.isEmpty, let modes = session.holdCycle {
       HoldCycleRow(session: session, modes: modes)
     }
   }
@@ -382,7 +384,7 @@ struct HoldCycleRow: View {
       Text("Modes to cycle through, on both earbuds").font(.caption).foregroundStyle(.secondary)
       GlassEffectContainer(spacing: 8) {
         HStack(alignment: .top, spacing: 2) {
-          ForEach(HoldMode.allCases, id: \.self) { mode in
+          ForEach(session.profile.holdModes, id: \.self) { mode in
             let on = modes.contains(mode)
             Button {
               Task { await session.setHoldCycle(on ? modes.subtracting([mode]) : modes.union([mode])) }
