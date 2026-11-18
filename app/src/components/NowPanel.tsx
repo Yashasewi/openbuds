@@ -33,6 +33,7 @@ export function NowPanel() {
   const { connection, reason, state } = useBuds();
   const { busy, status } = useAction("noise");
   const [connectError, setConnectError] = useState<string>();
+  const [previewMode, setPreviewMode] = useState<Group>("anc");
   const connected = connection === "connected";
   const mode = state.noise?.mode;
   const group = groupOf(mode);
@@ -62,88 +63,102 @@ export function NowPanel() {
           : `${LEVEL_NAMES[mode!]} strength`;
 
   return (
-    <div className="flex flex-col gap-7">
-      <header className="flex items-center justify-between gap-4">
+    <div className="border border-ink/35 bg-sheet/88 backdrop-blur-[2px]">
+      <header className="flex items-center justify-between gap-4 border-b border-ink/15 px-5 py-3.5">
         <div className="flex items-baseline gap-2.5">
-          <span className="text-[1.15rem] font-semibold tracking-[-0.02em]">Buds 4</span>
-          {state.firmware && <span className="text-sm text-ink/50">firmware {state.firmware}</span>}
+          <span className="display-sharp text-[1.05rem] font-normal tracking-[-0.015em] text-ink">
+            Buds 4
+          </span>
+          {state.firmware && (
+            <span className="font-mono text-[0.76rem] text-ink/48">fw {state.firmware}</span>
+          )}
         </div>
         <ConnectionBadge connection={connection} />
       </header>
 
-      <div className="relative mx-auto w-full max-w-[22rem]">
-        <SoundField mode={connected ? mode : undefined} live={connected} />
-      </div>
+      <div className="flex flex-col gap-5 p-5">
+        <SoundField mode={connected ? mode : previewMode} live={connected} />
 
-      <div className="-mt-2">
-        <p className="numeral text-[2.6rem] leading-[1.05] font-medium tracking-[-0.03em] text-ink">
-          {headline}
-        </p>
-        <p className="mt-1.5 min-h-[1.4em] text-[0.95rem] text-ink/60">
-          {connected
-            ? detail
-            : connection === "restarting"
-              ? "The earbuds are restarting their connection. This takes a few seconds."
-              : "Connect to see and change what your earbuds are doing."}
-        </p>
-      </div>
-
-      {connected ? (
-        <div className="flex flex-col gap-2.5">
+        {!connected && (
           <Segmented
-            label="Noise control"
-            value={group}
+            size="sm"
+            label="Preview sound field"
+            value={previewMode}
             options={GROUPS}
-            disabled={busy}
-            onChange={(g) => run("noise", () => session.setNoise(g))}
+            onChange={setPreviewMode}
           />
-          <div
-            className={cx(
-              "grid transition-[grid-template-rows,opacity] duration-300",
-              group === "anc" ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
-            )}
-          >
-            <div className="overflow-hidden" inert={group !== "anc"}>
-              <Segmented
-                size="sm"
-                label="Noise cancelling strength"
-                value={mode as AncLevel}
-                options={LEVELS}
-                disabled={busy}
-                onChange={(level) => run("noise", () => session.setNoise(level))}
-              />
+        )}
+
+        <div>
+          <p className="display-sharp text-[2.2rem] leading-[1.04] font-extralight tracking-[-0.025em] text-ink">
+            {headline}
+          </p>
+          <p className="mt-1.5 min-h-[1.4em] text-[0.88rem] font-light leading-relaxed text-ink/58">
+            {connected
+              ? detail
+              : connection === "restarting"
+                ? "The earbuds are restarting their connection. This takes a few seconds."
+                : "Connect in Chrome to read and control your OnePlus Buds 4."}
+          </p>
+        </div>
+
+        {connected ? (
+          <div className="flex flex-col gap-2">
+            <Segmented
+              label="Noise control"
+              value={group}
+              options={GROUPS}
+              disabled={busy}
+              onChange={(g) => run("noise", () => session.setNoise(g))}
+            />
+            <div
+              className={cx(
+                "grid transition-[grid-template-rows,opacity] duration-300",
+                group === "anc" ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
+              )}
+            >
+              <div className="overflow-hidden" inert={group !== "anc"}>
+                <Segmented
+                  size="sm"
+                  label="Noise cancelling strength"
+                  value={mode as AncLevel}
+                  options={LEVELS}
+                  disabled={busy}
+                  onChange={(level) => run("noise", () => session.setNoise(level))}
+                />
+              </div>
             </div>
+            <Status status={status} />
           </div>
-          <Status status={status} />
-        </div>
-      ) : (
-        <div className="flex flex-col gap-3">
-          <Button
-            variant="primary"
-            className="h-12 w-full text-base"
-            disabled={connection === "connecting" || connection === "restarting"}
-            onClick={onConnect}
-          >
-            {connection === "connecting" ? "Connecting…" : "Connect earbuds"}
-          </Button>
-          {(connectError || (connection === "disconnected" && reason)) && (
-            <p className="rounded-xl bg-amber/15 px-3 py-2 text-[0.88rem] text-warn">
-              {(connection === "disconnected" && reason) || connectError}
-            </p>
-          )}
-        </div>
-      )}
+        ) : (
+          <div className="flex flex-col gap-2.5">
+            <Button
+              variant="primary"
+              className="h-11 w-full text-[0.92rem]"
+              disabled={connection === "connecting" || connection === "restarting"}
+              onClick={onConnect}
+            >
+              {connection === "connecting" ? "Connecting…" : "Connect earbuds"}
+            </Button>
+            {(connectError || (connection === "disconnected" && reason)) && (
+              <p className="border border-amber/40 bg-amber/12 px-3 py-2 text-[0.83rem] text-warn">
+                {(connection === "disconnected" && reason) || connectError}
+              </p>
+            )}
+          </div>
+        )}
 
-      <Battery />
+        <Battery />
 
-      {connected && (
-        <div className="flex gap-2">
-          <Button disabled={busy} onClick={() => run("refresh", () => session.refresh())}>
-            Read again
-          </Button>
-          <Button onClick={disconnect}>Disconnect</Button>
-        </div>
-      )}
+        {connected && (
+          <div className="grid grid-cols-2 gap-2">
+            <Button disabled={busy} onClick={() => run("refresh", () => session.refresh())}>
+              Read again
+            </Button>
+            <Button onClick={disconnect}>Disconnect</Button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -160,18 +175,18 @@ function ConnectionBadge({ connection }: { connection: string }) {
   return (
     <span
       className={cx(
-        "inline-flex items-center gap-2 rounded-full px-3 py-1 text-[0.82rem]",
-        on ? "bg-mint/45 text-tip" : "bg-ink/[0.06] text-ink/60",
+        "inline-flex items-center gap-2 border px-2.5 py-0.5 font-mono text-[0.74rem]",
+        on ? "border-tip/50 bg-tip/12 text-tip" : "border-ink/20 bg-fog/60 text-ink/58",
       )}
     >
       <span
         className={cx(
-          "size-1.5 rounded-full",
+          "size-1.5",
           on
             ? "bg-tip"
             : connection === "connecting" || connection === "restarting"
               ? "pulse bg-amber"
-              : "bg-ink/30",
+              : "bg-ink/35",
         )}
       />
       {label}
@@ -190,7 +205,7 @@ function Battery() {
   const stale = connection !== "connected";
   return (
     <div
-      className={cx("grid grid-cols-3 gap-3 border-t border-ink/10 pt-5", stale && "opacity-55")}
+      className={cx("grid grid-cols-3 gap-3 border-t border-ink/15 pt-4", stale && "opacity-65")}
     >
       {SIDES.map(({ side, label }) => {
         const level = state.battery?.[side],
@@ -212,17 +227,15 @@ function Battery() {
               : "\u00a0";
         return (
           <div key={side} className="min-w-0">
-            <div className="text-[0.85rem] text-ink/55">{label}</div>
-            <div className="numeral mt-0.5 text-[2rem] leading-none font-medium tracking-[-0.03em] tabular-nums">
+            <div className="font-mono text-[0.76rem] text-ink/52">{label}</div>
+            <div className="mt-1 font-mono text-[1.7rem] leading-none font-light tracking-[-0.03em] text-ink tabular-nums">
               {level?.percent ?? "–"}
-              <span className="ml-0.5 text-base font-normal text-ink/45">
-                {level?.percent ? "%" : ""}
-              </span>
+              <span className="ml-0.5 text-xs text-ink/45">{level?.percent ? "%" : ""}</span>
             </div>
-            <div className="mt-2.5 h-1 overflow-hidden rounded-full bg-ink/10">
+            <div className="mt-2.5 h-[2px] overflow-hidden bg-ink/14">
               <div
                 className={cx(
-                  "h-full rounded-full transition-[width] duration-700",
+                  "h-full transition-[width] duration-700",
                   level?.charging ? "bg-amber" : "bg-tip",
                 )}
                 style={{ width: `${level?.percent ?? 0}%` }}
@@ -230,8 +243,8 @@ function Battery() {
             </div>
             <div
               className={cx(
-                "mt-1.5 truncate text-[0.82rem]",
-                level?.charging ? "text-warn" : "text-ink/55",
+                "mt-1.5 truncate font-mono text-[0.72rem]",
+                level?.charging ? "text-warn" : "text-ink/50",
               )}
             >
               {note}

@@ -2,13 +2,14 @@
 
 @theme {
   --font-sans: "Geologica Variable", ui-sans-serif, system-ui, sans-serif;
-  --color-fog: #e8ecf4;
-  --color-sheet: #f6f8fc;
-  --color-ink: #151c33;
-  --color-tip: #2a4fd6;
-  --color-mint: #bcd4ff;
-  --color-amber: #e3a13b;
-  --color-warn: #8a5300;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --color-fog: #000000;
+  --color-sheet: #070a0f;
+  --color-ink: #eef3fa;
+  --color-tip: #5ce1ff;
+  --color-mint: #102a38;
+  --color-amber: #e89b3c;
+  --color-warn: #f3b35e;
 }
 
 @layer base {
@@ -16,37 +17,29 @@
     background: var(--color-fog);
     color: var(--color-ink);
     font-family: var(--font-sans);
-    font-variation-settings: "SHRP" 0;
+    font-variation-settings: "SHRP" 40;
     -webkit-font-smoothing: antialiased;
     scroll-behavior: smooth;
+    color-scheme: dark;
   }
   body {
     min-height: 100dvh;
-    background:
-      radial-gradient(60rem 40rem at 12% -10%, rgb(92 158 255 / 0.3), transparent 60%),
-      var(--color-fog);
+    background: var(--color-fog);
   }
   :focus-visible {
-    outline: 2px solid var(--color-tip);
-    outline-offset: 2px;
+    outline: 1.5px solid var(--color-tip);
+    outline-offset: 3px;
   }
   ::selection {
-    background: var(--color-mint);
+    background: rgb(92 225 255 / 0.25);
+    color: var(--color-ink);
   }
 }
 
-/* Sharpened Geologica for figures and display text. */
-.numeral {
+/* Sharpened Geologica for figures and display headings. */
+.numeral,
+.display-sharp {
   font-variation-settings: "SHRP" 100;
-}
-
-.sound-field circle {
-  transition:
-    r 0.8s cubic-bezier(0.2, 0.7, 0.2, 1),
-    cx 0.8s cubic-bezier(0.2, 0.7, 0.2, 1),
-    cy 0.8s cubic-bezier(0.2, 0.7, 0.2, 1),
-    opacity 0.6s ease,
-    stroke-width 0.6s ease;
 }
 
 .pulse {
@@ -54,7 +47,7 @@
 }
 @keyframes pulse {
   50% {
-    opacity: 0.25;
+    opacity: 0.22;
   }
 }
 
@@ -65,28 +58,24 @@
   cursor: pointer;
 }
 .range::-webkit-slider-runnable-track {
-  height: 0.3rem;
-  border-radius: 999px;
+  height: 2px;
   background: linear-gradient(
     to right,
     var(--color-tip) var(--fill, 50%),
-    rgb(21 28 51 / 0.12) var(--fill, 50%)
+    rgb(238 243 250 / 0.18) var(--fill, 50%)
   );
 }
 .range::-webkit-slider-thumb {
   appearance: none;
-  width: 1.25rem;
-  height: 1.25rem;
-  margin-top: -0.475rem;
-  border-radius: 999px;
+  width: 0.65rem;
+  height: 1.15rem;
+  margin-top: -0.5rem;
   background: var(--color-sheet);
-  box-shadow:
-    0 0 0 1.5px var(--color-tip),
-    0 1px 3px rgb(21 28 51 / 0.2);
+  border: 1.5px solid var(--color-tip);
 }
 .range:disabled {
   cursor: not-allowed;
-  opacity: 0.45;
+  opacity: 0.4;
 }
 
 .range-vertical {
@@ -98,43 +87,40 @@
   cursor: pointer;
 }
 .range-vertical::-webkit-slider-runnable-track {
-  width: 0.3rem;
-  border-radius: 999px;
-  background: rgb(21 28 51 / 0.12);
+  width: 2px;
+  background: rgb(238 243 250 / 0.2);
 }
 .range-vertical::-webkit-slider-thumb {
   appearance: none;
-  width: 1.25rem;
-  height: 1.25rem;
-  margin-left: -0.475rem;
-  border-radius: 999px;
+  width: 1.15rem;
+  height: 0.65rem;
+  margin-left: -0.5rem;
   background: var(--color-tip);
-  box-shadow: 0 0 0 3px var(--color-sheet);
+  border: 1.5px solid var(--color-sheet);
 }
 
 .sheet-dialog {
   max-height: calc(100dvh - 2rem);
-  box-shadow: 0 30px 80px -20px rgb(21 28 51 / 0.35);
+  box-shadow: 0 32px 90px rgb(0 0 0 / 0.85);
 }
 .sheet-dialog::backdrop {
-  background: rgb(21 28 51 / 0.32);
-  backdrop-filter: blur(3px);
+  background: rgb(0 0 0 / 0.72);
+  backdrop-filter: blur(4px);
 }
 .sheet-dialog[open] {
-  animation: rise 0.22s cubic-bezier(0.2, 0.7, 0.2, 1);
+  animation: rise 0.2s cubic-bezier(0.22, 1, 0.36, 1);
 }
 @keyframes rise {
   from {
     opacity: 0;
-    transform: translateY(8px) scale(0.98);
+    transform: translateY(6px);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
-  *::after,
-  .sound-field circle {
+  *::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
