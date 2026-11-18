@@ -67,7 +67,7 @@ export function Sound() {
                 type="button"
                 disabled={presets.busy}
                 onClick={() => setEditing("new")}
-                className="flex min-h-[4.75rem] items-center justify-center rounded-2xl border border-dashed border-ink/20 px-3 text-[0.92rem] text-ink/60 transition-colors hover:border-tip/50 hover:text-tip disabled:opacity-45"
+                className="flex min-h-[4.75rem] items-center justify-center rounded-xl border border-dashed border-ink/20 px-3 text-[0.9rem] text-ink/60 transition-colors hover:border-tip hover:text-mint disabled:opacity-45"
               >
                 New preset
               </button>
@@ -133,8 +133,10 @@ function PresetTile({
   return (
     <div
       className={cx(
-        "group relative flex min-h-[4.75rem] flex-col justify-between rounded-2xl p-3 transition-colors",
-        selected ? "bg-tip text-sheet" : "bg-ink/[0.05] text-ink hover:bg-ink/[0.08]",
+        "group relative flex min-h-[4.75rem] flex-col justify-between rounded-xl border p-3 transition-colors",
+        selected
+          ? "border-tip bg-tip/15 text-ink"
+          : "border-ink/[0.06] bg-ink/[0.05] text-ink hover:bg-ink/[0.08]",
       )}
     >
       <button
@@ -142,11 +144,13 @@ function PresetTile({
         aria-pressed={selected}
         disabled={disabled}
         onClick={() => !selected && onSelect()}
-        className="absolute inset-0 rounded-2xl disabled:cursor-not-allowed"
+        className="absolute inset-0 rounded-xl disabled:cursor-not-allowed"
         aria-label={`Use ${name}`}
       />
       <div className="pointer-events-none flex items-start justify-between gap-2">
-        <span className="text-[0.95rem] leading-tight">{name}</span>
+        <span className={cx("text-[0.92rem] leading-tight", selected && "font-medium")}>
+          {name}
+        </span>
       </div>
       {bands ? (
         <Curve bands={bands} selected={selected} />
@@ -154,7 +158,7 @@ function PresetTile({
         <span
           className={cx(
             "pointer-events-none text-[0.8rem]",
-            selected ? "text-sheet/70" : "text-ink/50",
+            selected ? "text-mint" : "text-ink/50",
           )}
         >
           {note}
@@ -165,10 +169,7 @@ function PresetTile({
           type="button"
           disabled={disabled}
           onClick={onEdit}
-          className={cx(
-            "absolute top-2 right-2 rounded-lg px-2 py-0.5 text-[0.78rem] transition-colors",
-            selected ? "text-sheet/80 hover:bg-sheet/15" : "text-ink/55 hover:bg-ink/10",
-          )}
+          className="absolute top-2 right-2 rounded-lg px-2 py-0.5 text-[0.76rem] text-ink/65 transition-colors hover:bg-ink/12 hover:text-ink"
         >
           Edit
         </button>
@@ -293,12 +294,12 @@ function EditorBody({
       }}
     >
       <label className="mt-5 block">
-        <span className="text-[0.88rem] text-ink/60">Name</span>
+        <span className="text-[0.86rem] text-ink/60">Name</span>
         <input
           value={name}
           maxLength={16}
           onChange={(e) => setName(e.target.value)}
-          className="mt-1.5 h-11 w-full rounded-xl bg-ink/[0.06] px-3.5 text-base text-ink outline-none focus-visible:ring-2 focus-visible:ring-tip"
+          className="mt-1.5 h-10 w-full rounded-xl border border-ink/10 bg-ink/[0.06] px-3.5 text-base text-ink outline-none focus-visible:ring-2 focus-visible:ring-tip"
         />
       </label>
       {!valid && (
@@ -306,10 +307,10 @@ function EditorBody({
           Use 1 to 16 plain letters, digits or symbols.
         </p>
       )}
-      <div className="mt-6 grid grid-cols-6 gap-1 rounded-2xl bg-ink/[0.04] px-2 pt-4 pb-3">
+      <div className="mt-6 grid grid-cols-6 gap-1 rounded-2xl bg-ink/[0.05] px-2 pt-4 pb-3">
         {bands.map((b, i) => (
           <label key={b.frequency} className="flex flex-col items-center gap-2">
-            <output className="numeral text-[0.95rem] tabular-nums">{signedText(b.gain)}</output>
+            <output className="numeral text-[0.9rem] tabular-nums">{signedText(b.gain)}</output>
             <input
               type="range"
               min={-EQ_GAIN}

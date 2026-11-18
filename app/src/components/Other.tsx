@@ -58,7 +58,7 @@ export function Connections() {
             aria-hidden
             className={cx(
               "grid size-9 shrink-0 place-items-center rounded-xl",
-              device.connected ? "bg-mint/45 text-tip" : "bg-ink/[0.06] text-ink/45",
+              device.connected ? "bg-tip/18 text-mint" : "bg-ink/[0.06] text-ink/45",
             )}
           >
             <svg viewBox="0 0 20 20" className="size-4.5">
@@ -76,13 +76,13 @@ export function Connections() {
             </svg>
           </span>
           <div className="min-w-0">
-            <div className="truncate text-[1rem]">
+            <div className="truncate text-[0.96rem]">
               {device.name || "Unnamed device"}
               {device.thisDevice && (
-                <span className="ml-2 text-[0.85rem] text-ink/50">this Mac</span>
+                <span className="ml-2 text-[0.82rem] text-ink/50">this Mac</span>
               )}
             </div>
-            <div className="text-[0.85rem] text-ink/55">
+            <div className="text-[0.84rem] text-ink/55">
               {device.connected
                 ? device.playing
                   ? "Connected, playing audio"
@@ -103,16 +103,16 @@ export function About() {
   return (
     <Group title="About">
       <a href={REPO} className="group flex items-center gap-3.5 py-3.5">
-        <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-ink text-sheet">
+        <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-ink/12 text-ink">
           <GitHubMark className="size-4.5" />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-[1rem] group-hover:text-tip">Source on GitHub</span>
-          <span className="block truncate text-[0.88rem] text-ink/50">
+          <span className="block text-[0.96rem] group-hover:text-mint">Source on GitHub</span>
+          <span className="block truncate text-[0.85rem] text-ink/50">
             OpenBuds is open source under GPL-3.0-or-later
           </span>
         </span>
-        <span aria-hidden className="text-ink/35 group-hover:text-tip">
+        <span aria-hidden className="text-ink/35 group-hover:text-mint">
           ↗
         </span>
       </a>
@@ -163,8 +163,8 @@ export function About() {
 function Info({ label, value, error }: { label: string; value?: string; error?: string }) {
   return (
     <div className="flex items-center justify-between gap-4 py-3.5">
-      <span className="text-[1rem]">{label}</span>
-      <span className={cx("text-[0.95rem] tabular-nums", value ? "text-ink/70" : "text-ink/40")}>
+      <span className="text-[0.95rem]">{label}</span>
+      <span className={cx("text-[0.92rem] tabular-nums", value ? "text-ink/75" : "text-ink/40")}>
         {value ?? (error ? "Not reported" : "–")}
       </span>
     </div>

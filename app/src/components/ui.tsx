@@ -25,13 +25,13 @@ export function Switch({
       disabled={disabled || on === undefined}
       onClick={() => onChange(!on)}
       className={cx(
-        "relative h-7 w-12 shrink-0 rounded-full transition-colors duration-200 disabled:opacity-40",
-        on ? "bg-tip" : "bg-ink/15",
+        "relative h-7 w-12 shrink-0 rounded-full transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-40",
+        on ? "bg-tip" : "bg-ink/16",
       )}
     >
       <span
         className={cx(
-          "absolute top-1 left-1 size-5 rounded-full bg-sheet shadow-[0_1px_2px_rgb(21_28_51/0.25)] transition-transform duration-200",
+          "absolute top-1 left-1 size-5 rounded-full bg-white shadow-[0_1px_3px_rgb(0_0_0/0.35)] transition-transform duration-200",
           on && "translate-x-5",
         )}
       />
@@ -79,13 +79,13 @@ export function Segmented<T extends string>({
             disabled={disabled}
             onClick={() => !selected && onChange(o.value)}
             className={cx(
-              "rounded-xl px-2 text-center leading-tight transition-colors duration-200 disabled:cursor-not-allowed",
+              "rounded-xl px-2 text-center leading-tight transition-colors duration-150 disabled:cursor-not-allowed",
               size === "md"
-                ? "min-h-12 flex-auto px-2.5 py-2 text-[0.88rem] whitespace-nowrap"
+                ? "min-h-11 flex-auto px-2.5 py-2 text-[0.88rem] whitespace-nowrap"
                 : "min-h-9 rounded-lg py-1.5 text-sm",
               selected
-                ? "bg-sheet text-ink shadow-[0_1px_3px_rgb(21_28_51/0.12)]"
-                : "text-ink/65 hover:text-ink disabled:hover:text-ink/65",
+                ? "bg-ink/14 font-medium text-ink shadow-[0_1px_2px_rgb(0_0_0/0.25)]"
+                : "text-ink/60 hover:text-ink disabled:hover:text-ink/60",
             )}
           >
             {o.label}
@@ -116,13 +116,15 @@ export function Select({
         value={value ?? ""}
         disabled={disabled}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="h-10 appearance-none rounded-xl bg-ink/[0.06] py-0 pr-9 pl-3.5 text-[0.95rem] text-ink transition-colors hover:bg-ink/10 disabled:opacity-50"
+        className="h-10 appearance-none rounded-xl border border-ink/[0.08] bg-ink/[0.06] py-0 pr-9 pl-3.5 text-[0.92rem] text-ink transition-colors hover:bg-ink/10 disabled:opacity-50"
       >
         {value !== undefined && !options.some((o) => o.value === value) && (
-          <option value={value}>Other ({value})</option>
+          <option value={value} className="bg-sheet text-ink">
+            Other ({value})
+          </option>
         )}
         {options.map((o) => (
-          <option key={o.value} value={o.value}>
+          <option key={o.value} value={o.value} className="bg-sheet text-ink">
             {o.label}
           </option>
         ))}
@@ -193,7 +195,7 @@ export function Range({
         }}
         className="range min-w-0 flex-1"
       />
-      <output ref={out} className="numeral w-10 text-right text-lg tabular-nums">
+      <output ref={out} className="numeral w-10 text-right text-base text-ink/85 tabular-nums">
         {value === undefined ? "–" : format(shown)}
       </output>
     </div>
@@ -211,16 +213,16 @@ export function Group({
 }) {
   const id = useId();
   return (
-    <section aria-labelledby={id} className="scroll-mt-6">
-      <div className="mb-3 px-1">
-        <h2 id={id} className="text-[1.35rem] font-medium tracking-[-0.01em] text-ink">
+    <section aria-labelledby={id} className="scroll-mt-20">
+      <div className="mb-2.5 px-1">
+        <h2 id={id} className="text-[1.18rem] font-medium tracking-[-0.015em] text-ink">
           {title}
         </h2>
         {description && (
-          <p className="mt-0.5 max-w-[56ch] text-[0.92rem] text-ink/60">{description}</p>
+          <p className="mt-0.5 max-w-[58ch] text-[0.88rem] text-ink/55">{description}</p>
         )}
       </div>
-      <div className="divide-y divide-ink/[0.08] rounded-[1.4rem] bg-sheet px-5 shadow-[0_1px_0_rgb(21_28_51/0.04)]">
+      <div className="divide-y divide-ink/[0.07] rounded-2xl border border-ink/[0.08] bg-sheet px-5">
         {children}
       </div>
     </section>
@@ -248,9 +250,9 @@ export function Row({
         className={cx("flex gap-x-6 gap-y-3", stack ? "flex-col" : "items-center justify-between")}
       >
         <div className="min-w-0">
-          <div className="text-[1rem] text-ink">{title}</div>
+          <div className="text-[0.96rem] font-normal text-ink">{title}</div>
           {description && (
-            <div className="mt-0.5 max-w-[52ch] text-[0.88rem] leading-snug text-ink/60">
+            <div className="mt-0.5 max-w-[52ch] text-[0.86rem] leading-snug text-ink/55">
               {description}
             </div>
           )}
@@ -267,13 +269,13 @@ export function Status({ status }: { status?: ActionState }) {
   return (
     <div aria-live="polite" className="empty:hidden">
       {status?.phase === "pending" && (
-        <p className="mt-2.5 flex items-center gap-2 text-[0.85rem] text-tip">
+        <p className="mt-2.5 flex items-center gap-2 text-[0.84rem] text-mint">
           <span className="pulse size-1.5 rounded-full bg-tip" />
           Waiting for the earbuds to confirm
         </p>
       )}
       {status?.phase === "done" && (
-        <p className="mt-2.5 flex items-center gap-2 text-[0.85rem] text-tip">
+        <p className="mt-2.5 flex items-center gap-2 text-[0.84rem] text-mint">
           <svg aria-hidden viewBox="0 0 12 12" className="size-3">
             <path
               d="m2.5 6.2 2.3 2.3 4.7-5"
@@ -288,7 +290,7 @@ export function Status({ status }: { status?: ActionState }) {
         </p>
       )}
       {status?.phase === "error" && (
-        <p className="mt-2.5 rounded-xl bg-amber/15 px-3 py-2 text-[0.85rem] text-warn">
+        <p className="mt-2.5 rounded-xl bg-amber/15 px-3 py-2 text-[0.84rem] text-warn">
           {status.message}
         </p>
       )}
@@ -307,9 +309,9 @@ export function Button({
       type="button"
       {...props}
       className={cx(
-        "inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-[0.95rem] whitespace-nowrap transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-45",
-        variant === "primary" && "bg-tip text-sheet hover:bg-tip/90",
-        variant === "quiet" && "bg-ink/[0.06] text-ink hover:bg-ink/10",
+        "inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-[0.92rem] font-medium whitespace-nowrap transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-45",
+        variant === "primary" && "bg-tip text-white hover:bg-tip/90",
+        variant === "quiet" && "border border-ink/[0.08] bg-ink/[0.06] text-ink hover:bg-ink/10",
         variant === "danger" && "bg-amber/15 text-warn hover:bg-amber/25",
         className,
       )}
@@ -348,13 +350,13 @@ export function Dialog({
         onClose();
       }}
       className={cx(
-        "sheet-dialog m-auto w-[min(100vw-2rem,var(--w))] rounded-[1.6rem] bg-sheet p-0 text-ink",
+        "sheet-dialog m-auto w-[min(100vw-2rem,var(--w))] rounded-2xl border border-ink/12 bg-sheet p-0 text-ink",
         wide ? "[--w:34rem]" : "[--w:26rem]",
       )}
     >
       {open && (
         <div className="p-6">
-          <h2 className="text-xl font-medium tracking-[-0.01em]">{title}</h2>
+          <h2 className="text-lg font-medium tracking-[-0.01em]">{title}</h2>
           {children}
         </div>
       )}
