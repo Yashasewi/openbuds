@@ -2,13 +2,15 @@
 
 @theme {
   --font-sans: "Geologica Variable", ui-sans-serif, system-ui, sans-serif;
-  --color-fog: #e8ecf4;
-  --color-sheet: #f6f8fc;
-  --color-ink: #151c33;
-  --color-tip: #2a4fd6;
-  --color-mint: #bcd4ff;
-  --color-amber: #e3a13b;
-  --color-warn: #8a5300;
+  --font-serif: "EB Garamond Variable", Georgia, Cambria, serif;
+  --color-fog: #f6f6f4;
+  --color-sheet: #ffffff;
+  --color-ink: #171918;
+  --color-muted: #6d7270;
+  --color-tip: #2a6f5b;
+  --color-mint: #d7eae3;
+  --color-amber: #c9822b;
+  --color-warn: #7c4a0a;
 }
 
 @layer base {
@@ -22,31 +24,193 @@
   }
   body {
     min-height: 100dvh;
-    background:
-      radial-gradient(60rem 40rem at 12% -10%, rgb(92 158 255 / 0.3), transparent 60%),
-      var(--color-fog);
+    background: var(--color-fog);
   }
   :focus-visible {
-    outline: 2px solid var(--color-tip);
+    outline: 1.5px solid var(--color-tip);
     outline-offset: 2px;
   }
   ::selection {
     background: var(--color-mint);
+    color: var(--color-ink);
   }
 }
 
-/* Sharpened Geologica for figures and display text. */
 .numeral {
   font-variation-settings: "SHRP" 100;
 }
 
-.sound-field circle {
-  transition:
-    r 0.8s cubic-bezier(0.2, 0.7, 0.2, 1),
-    cx 0.8s cubic-bezier(0.2, 0.7, 0.2, 1),
-    cy 0.8s cubic-bezier(0.2, 0.7, 0.2, 1),
-    opacity 0.6s ease,
-    stroke-width 0.6s ease;
+/* Isometric 4-tone hardware anatomy plate */
+.iso-figure {
+  margin: 0;
+}
+.iso-plate {
+  position: relative;
+  overflow: hidden;
+  padding: 2.1rem 1.1rem 2rem;
+  background: var(--color-sheet);
+  border: 1px solid rgb(23 25 24 / 0.12);
+  box-shadow:
+    inset 0 1px 0 0 #ffffff,
+    0 1px 2px rgb(23 25 24 / 0.03),
+    0 8px 24px -12px rgb(23 25 24 / 0.07);
+  cursor: grab;
+  touch-action: pan-y;
+}
+.iso-plate:active {
+  cursor: grabbing;
+}
+.iso-plate-corners {
+  position: absolute;
+  inset: 0.78rem 0.95rem;
+  pointer-events: none;
+}
+.iso-plate-corner {
+  position: absolute;
+  color: var(--color-muted);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.64rem;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.iso-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.iso-svg path,
+.iso-svg circle,
+.iso-svg ellipse {
+  vector-effect: non-scaling-stroke;
+}
+
+.iso-top {
+  fill: #ffffff;
+  stroke: none;
+}
+.iso-shade {
+  stroke: none;
+}
+.iso-shade[data-shade="3"] {
+  fill: #f4f5f3;
+}
+.iso-shade[data-shade="2"] {
+  fill: #eaebe8;
+}
+.iso-shade[data-shade="1"] {
+  fill: #dfe1dd;
+}
+.iso-shade[data-shade="0"] {
+  fill: #cfd3ce;
+}
+
+/* Seamless facet welding to prevent subpixel SVG seam hairlines on lathes */
+.iso-top[data-seamless] {
+  stroke: #ffffff;
+  stroke-width: 0.42px;
+  stroke-linejoin: round;
+}
+.iso-shade[data-seamless][data-shade="3"] {
+  stroke: #f4f5f3;
+  stroke-width: 0.42px;
+  stroke-linejoin: round;
+}
+.iso-shade[data-seamless][data-shade="2"] {
+  stroke: #eaebe8;
+  stroke-width: 0.42px;
+  stroke-linejoin: round;
+}
+.iso-shade[data-seamless][data-shade="1"] {
+  stroke: #dfe1dd;
+  stroke-width: 0.42px;
+  stroke-linejoin: round;
+}
+.iso-shade[data-seamless][data-shade="0"] {
+  stroke: #cfd3ce;
+  stroke-width: 0.42px;
+  stroke-linejoin: round;
+}
+
+/* One lit accent: Zen Celadon active subsystem */
+.iso-solid[data-lit] > .iso-top {
+  fill: #edf6f2;
+  stroke: #edf6f2;
+}
+.iso-solid[data-lit] > .iso-shade[data-shade="3"] {
+  fill: #dbeee6;
+  stroke: #dbeee6;
+}
+.iso-solid[data-lit] > .iso-shade[data-shade="2"] {
+  fill: #c1dfd2;
+  stroke: #c1dfd2;
+}
+.iso-solid[data-lit] > .iso-shade[data-shade="1"] {
+  fill: #9ec8b7;
+  stroke: #9ec8b7;
+}
+.iso-solid[data-lit] > .iso-shade[data-shade="0"] {
+  fill: #7fb19d;
+  stroke: #7fb19d;
+}
+
+/* Precision brass micro-contacts (voice coil, pogo pins, DAC dies) */
+.iso-solid[data-brass] > .iso-top {
+  fill: #f1e4c8;
+  stroke: #f1e4c8;
+}
+.iso-solid[data-brass] > .iso-shade[data-shade="3"] {
+  fill: #e4ce9f;
+  stroke: #e4ce9f;
+}
+.iso-solid[data-brass] > .iso-shade[data-shade="2"] {
+  fill: #d1b379;
+  stroke: #d1b379;
+}
+.iso-solid[data-brass] > .iso-shade[data-shade="1"] {
+  fill: #b89659;
+  stroke: #b89659;
+}
+.iso-solid[data-brass] > .iso-shade[data-shade="0"] {
+  fill: #9b7b42;
+  stroke: #9b7b42;
+}
+
+/* Recessed case dock cavities */
+.iso-solid[data-dark] > .iso-top {
+  fill: #d7dad6;
+  stroke: #d7dad6;
+}
+.iso-solid[data-dark] > .iso-shade {
+  fill: #c5c9c4;
+  stroke: #c5c9c4;
+}
+
+.iso-line {
+  fill: none;
+  stroke: #abafad;
+  stroke-width: 0.66px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.iso-line[data-tone="hi"] {
+  stroke: #222624;
+  stroke-width: 0.72px;
+}
+.iso-line[data-tone="mid"] {
+  stroke: #6f7572;
+}
+.iso-line[data-tone="lo"] {
+  stroke: #abafad;
+}
+.iso-line[data-tone="faint"] {
+  stroke: #d7dad7;
+}
+.iso-line[data-tone="celadon"] {
+  stroke: #1f5747;
+  stroke-width: 0.76px;
 }
 
 .pulse {
@@ -60,29 +224,29 @@
 
 .range {
   appearance: none;
-  height: 1.5rem;
+  height: 1.4rem;
   background: transparent;
   cursor: pointer;
 }
 .range::-webkit-slider-runnable-track {
-  height: 0.3rem;
+  height: 0.24rem;
   border-radius: 999px;
   background: linear-gradient(
     to right,
     var(--color-tip) var(--fill, 50%),
-    rgb(21 28 51 / 0.12) var(--fill, 50%)
+    rgb(23 25 24 / 0.13) var(--fill, 50%)
   );
 }
 .range::-webkit-slider-thumb {
   appearance: none;
-  width: 1.25rem;
-  height: 1.25rem;
-  margin-top: -0.475rem;
+  width: 1.05rem;
+  height: 1.05rem;
+  margin-top: -0.405rem;
   border-radius: 999px;
   background: var(--color-sheet);
   box-shadow:
     0 0 0 1.5px var(--color-tip),
-    0 1px 3px rgb(21 28 51 / 0.2);
+    0 1px 2px rgb(23 25 24 / 0.18);
 }
 .range:disabled {
   cursor: not-allowed;
@@ -93,48 +257,48 @@
   appearance: none;
   writing-mode: vertical-lr;
   direction: rtl;
-  width: 1.5rem;
+  width: 1.4rem;
   background: transparent;
   cursor: pointer;
 }
 .range-vertical::-webkit-slider-runnable-track {
-  width: 0.3rem;
+  width: 0.24rem;
   border-radius: 999px;
-  background: rgb(21 28 51 / 0.12);
+  background: rgb(23 25 24 / 0.13);
 }
 .range-vertical::-webkit-slider-thumb {
   appearance: none;
-  width: 1.25rem;
-  height: 1.25rem;
-  margin-left: -0.475rem;
+  width: 1.05rem;
+  height: 1.05rem;
+  margin-left: -0.405rem;
   border-radius: 999px;
   background: var(--color-tip);
-  box-shadow: 0 0 0 3px var(--color-sheet);
+  box-shadow: 0 0 0 2.5px var(--color-sheet);
 }
 
 .sheet-dialog {
   max-height: calc(100dvh - 2rem);
-  box-shadow: 0 30px 80px -20px rgb(21 28 51 / 0.35);
+  border: 1px solid rgb(23 25 24 / 0.14);
+  box-shadow: 0 24px 64px -16px rgb(23 25 24 / 0.24);
 }
 .sheet-dialog::backdrop {
-  background: rgb(21 28 51 / 0.32);
-  backdrop-filter: blur(3px);
+  background: rgb(23 25 24 / 0.28);
+  backdrop-filter: blur(2px);
 }
 .sheet-dialog[open] {
-  animation: rise 0.22s cubic-bezier(0.2, 0.7, 0.2, 1);
+  animation: rise 0.18s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 @keyframes rise {
   from {
     opacity: 0;
-    transform: translateY(8px) scale(0.98);
+    transform: translateY(6px) scale(0.99);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
-  *::after,
-  .sound-field circle {
+  *::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;

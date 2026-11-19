@@ -11,10 +11,15 @@ import {
 import { confirm, run, session, useAction, useBuds } from "../lib/store";
 import { Button, Dialog, Group, Range, Row, Switch, cx } from "./ui";
 
-const BUILT_IN: { id: number; name: string; note: string }[] = [
-  { id: 0, name: "Balanced", note: "Even across the range" },
-  { id: 1, name: "Serenade", note: "Brighter voices" },
-  { id: 2, name: "Bass", note: "Fuller low end" },
+const BUILT_IN: { id: number; name: string; note: string; previewGains: number[] }[] = [
+  { id: 0, name: "Balanced", note: "Even across the range", previewGains: [0, 0, 0, 0, 0, 0] },
+  {
+    id: 1,
+    name: "Serenade",
+    note: "Forward midrange & vocals",
+    previewGains: [-1, 1, 3, 2, 0, -1],
+  },
+  { id: 2, name: "Bass", note: "Weighted low-end shelf", previewGains: [4, 3, 0, 0, 1, 0] },
 ];
 const signedText = (v: number) => (v > 0 ? `+${v}` : String(v));
 
@@ -25,18 +30,26 @@ export function Sound() {
   const [editing, setEditing] = useState<Preset | "new" | null>(null);
   const custom = state.customPresets ?? [];
 
+  const activeEqName =
+    BUILT_IN.find((b) => b.id === state.eq)?.name ??
+    custom.find((c) => c.id === state.eq)?.name ??
+    undefined;
+  const codecName = state.codec !== undefined ? CODECS[state.codec] : undefined;
+  const meta = [codecName, activeEqName].filter(Boolean).join(" · ") || undefined;
+
   return (
     <Group
-      title="Sound"
-      description="How your music is shaped. Every change is read back from the earbuds before it shows as done."
+      title="Sound & equalizer"
+      meta={meta}
+      description="Shaped across the 11 mm woofer and 6 mm tweeter. Every write is read back from the earbuds before showing as confirmed."
     >
       <Row
         stack
-        title="Equalizer"
+        title="Sound Master EQ"
         description={
           custom.length
-            ? "Select a preset. Custom presets can be edited."
-            : "Select a preset, or make your own."
+            ? "Select a preset, or edit your 6-band custom curves."
+            : "Select a factory tuning, or build a 6-band custom preset."
         }
         status={presets.status}
         control={
@@ -46,6 +59,10 @@ export function Sound() {
                 key={p.id}
                 name={p.name}
                 note={p.note}
+                bands={EQ_BANDS.map((frequency, idx) => ({
+                  frequency,
+                  gain: p.previewGains[idx] ?? 0,
+                }))}
                 selected={state.eq === p.id}
                 disabled={presets.busy}
                 onSelect={() => run("eq", () => session.setEq(p.id))}
@@ -67,9 +84,9 @@ export function Sound() {
                 type="button"
                 disabled={presets.busy}
                 onClick={() => setEditing("new")}
-                className="flex min-h-[4.75rem] items-center justify-center rounded-2xl border border-dashed border-ink/20 px-3 text-[0.92rem] text-ink/60 transition-colors hover:border-tip/50 hover:text-tip disabled:opacity-45"
+                className="flex min-h-[4.6rem] items-center justify-center rounded-md border border-dashed border-ink/20 px-3 text-[0.84rem] text-muted transition-colors hover:border-tip/60 hover:text-tip disabled:opacity-45"
               >
-                New preset
+                + New custom EQ
               </button>
             )}
           </div>
@@ -83,8 +100,8 @@ export function Sound() {
           title="Golden Sound"
           description={
             state.golden
-              ? `Tuned to your hearing profile from ${state.golden.name}.`
-              : "Tunes sound to your hearing. Run the hearing test in Tools to make a profile."
+              ? `Tuned to your ear-canal & hearing profile (${state.golden.name}).`
+              : "Compensates per ear across six frequencies. Run the hearing test in Tools to build a profile."
           }
         />
       )}
@@ -93,11 +110,11 @@ export function Sound() {
       {f[SWITCHES.hiRes] !== undefined && (
         <SwitchRow
           id={SWITCHES.hiRes}
-          title="Hi-Res audio"
-          description="Higher-quality wireless audio. Changing it restarts the connection for a few seconds."
+          title="Hi-Res audio (LHDC 5.0)"
+          description="Up to 24-bit / 192 kHz wireless audio. Toggling restarts the earbud link for a few seconds."
           unavailable={
             state.codec !== undefined && state.codec !== 7 && state.codec !== 8
-              ? `Needs LHDC, which macOS doesn’t support. This Mac is connected with ${CODECS[state.codec] ?? "another codec"}, so the earbuds refuse it here. It is set separately for each device, so it can still be on for your phone.`
+              ? `Requires LHDC 5.0, which macOS does not transmit. Connected over ${CODECS[state.codec] ?? "another codec"} on this computer; stored separately for your phone.`
               : undefined
           }
         />
@@ -105,8 +122,8 @@ export function Sound() {
       {f[SWITCHES.spatial] !== undefined && (
         <SwitchRow
           id={SWITCHES.spatial}
-          title="3D Audio"
-          description="Spatial sound. It can’t be on together with Hi-Res audio."
+          title="OnePlus 3D Audio"
+          description="Spatial soundstage processing. Cannot be active at the same time as Hi-Res audio."
         />
       )}
     </Group>
@@ -133,8 +150,10 @@ function PresetTile({
   return (
     <div
       className={cx(
-        "group relative flex min-h-[4.75rem] flex-col justify-between rounded-2xl p-3 transition-colors",
-        selected ? "bg-tip text-sheet" : "bg-ink/[0.05] text-ink hover:bg-ink/[0.08]",
+        "group relative flex min-h-[4.6rem] flex-col justify-between rounded-md p-3 transition-colors",
+        selected
+          ? "bg-mint/45 text-ink ring-1 ring-tip/55"
+          : "bg-fog/75 text-ink ring-1 ring-ink/10 hover:ring-ink/25",
       )}
     >
       <button
@@ -142,33 +161,25 @@ function PresetTile({
         aria-pressed={selected}
         disabled={disabled}
         onClick={() => !selected && onSelect()}
-        className="absolute inset-0 rounded-2xl disabled:cursor-not-allowed"
+        className="absolute inset-0 rounded-md disabled:cursor-not-allowed"
         aria-label={`Use ${name}`}
       />
-      <div className="pointer-events-none flex items-start justify-between gap-2">
-        <span className="text-[0.95rem] leading-tight">{name}</span>
-      </div>
-      {bands ? (
-        <Curve bands={bands} selected={selected} />
-      ) : (
-        <span
-          className={cx(
-            "pointer-events-none text-[0.8rem]",
-            selected ? "text-sheet/70" : "text-ink/50",
-          )}
-        >
-          {note}
+      <div className="pointer-events-none flex items-center justify-between gap-2">
+        <span className={cx("text-[0.86rem] leading-tight", selected && "font-medium text-tip")}>
+          {name}
         </span>
+        {selected && !onEdit && <span className="size-1.5 rounded-full bg-tip" />}
+      </div>
+      {bands && <Curve bands={bands} selected={selected} />}
+      {note && (
+        <span className="pointer-events-none truncate text-[0.74rem] text-muted">{note}</span>
       )}
       {onEdit && (
         <button
           type="button"
           disabled={disabled}
           onClick={onEdit}
-          className={cx(
-            "absolute top-2 right-2 rounded-lg px-2 py-0.5 text-[0.78rem] transition-colors",
-            selected ? "text-sheet/80 hover:bg-sheet/15" : "text-ink/55 hover:bg-ink/10",
-          )}
+          className="absolute top-2 right-2 rounded px-1.5 py-0.5 text-[0.74rem] text-muted transition-colors hover:bg-ink/8 hover:text-ink"
         >
           Edit
         </button>
@@ -179,9 +190,9 @@ function PresetTile({
 
 function Curve({ bands, selected }: { bands: Band[]; selected: boolean }) {
   const w = 100,
-    h = 22,
+    h = 20,
     x = (i: number) => (i / Math.max(1, bands.length - 1)) * w,
-    y = (g: number) => h / 2 - (g / EQ_GAIN) * (h / 2 - 2);
+    y = (g: number) => h / 2 - (g / EQ_GAIN) * (h / 2 - 2.5);
   const d = bands
     .map((b, i) => `${i ? "L" : "M"}${x(i).toFixed(1)} ${y(b.gain).toFixed(1)}`)
     .join(" ");
@@ -190,7 +201,7 @@ function Curve({ bands, selected }: { bands: Band[]; selected: boolean }) {
       aria-hidden
       viewBox={`0 0 ${w} ${h}`}
       preserveAspectRatio="none"
-      className="pointer-events-none h-5 w-full"
+      className="pointer-events-none my-1 h-4 w-full"
     >
       <line
         x1="0"
@@ -198,15 +209,15 @@ function Curve({ bands, selected }: { bands: Band[]; selected: boolean }) {
         y1={h / 2}
         y2={h / 2}
         stroke="currentColor"
-        strokeOpacity="0.2"
+        strokeOpacity="0.14"
         strokeWidth="1"
         vectorEffect="non-scaling-stroke"
       />
       <path
         d={d}
         fill="none"
-        stroke={selected ? "var(--color-mint)" : "var(--color-tip)"}
-        strokeWidth="1.8"
+        stroke={selected ? "var(--color-tip)" : "#6d7270"}
+        strokeWidth="1.5"
         strokeLinejoin="round"
         vectorEffect="non-scaling-stroke"
       />
@@ -228,7 +239,7 @@ function PresetEditor({
     <Dialog
       open={!!preset}
       onClose={onClose}
-      title={existing ? `Edit ${existing.name}` : "New preset"}
+      title={existing ? `Edit ${existing.name}` : "New 6-band preset"}
       wide
     >
       {preset && (
@@ -292,24 +303,26 @@ function EditorBody({
         if (valid) save();
       }}
     >
-      <label className="mt-5 block">
-        <span className="text-[0.88rem] text-ink/60">Name</span>
+      <label className="mt-4 block">
+        <span className="text-[0.82rem] text-muted">Preset name</span>
         <input
           value={name}
           maxLength={16}
           onChange={(e) => setName(e.target.value)}
-          className="mt-1.5 h-11 w-full rounded-xl bg-ink/[0.06] px-3.5 text-base text-ink outline-none focus-visible:ring-2 focus-visible:ring-tip"
+          className="mt-1 h-9.5 w-full rounded-md bg-fog px-3 text-[0.9rem] text-ink ring-1 ring-ink/14 outline-none focus-visible:ring-2 focus-visible:ring-tip"
         />
       </label>
       {!valid && (
-        <p className="mt-1.5 text-[0.82rem] text-warn">
-          Use 1 to 16 plain letters, digits or symbols.
+        <p className="mt-1.5 text-[0.78rem] text-warn">
+          Use 1 to 16 plain ASCII letters, digits or symbols.
         </p>
       )}
-      <div className="mt-6 grid grid-cols-6 gap-1 rounded-2xl bg-ink/[0.04] px-2 pt-4 pb-3">
+      <div className="mt-5 grid grid-cols-6 gap-1 rounded-md border border-ink/10 bg-fog px-2 pt-3.5 pb-2.5">
         {bands.map((b, i) => (
           <label key={b.frequency} className="flex flex-col items-center gap-2">
-            <output className="numeral text-[0.95rem] tabular-nums">{signedText(b.gain)}</output>
+            <output className="numeral text-[0.84rem] text-ink tabular-nums">
+              {signedText(b.gain)}
+            </output>
             <input
               type="range"
               min={-EQ_GAIN}
@@ -322,14 +335,14 @@ function EditorBody({
                   bands.map((x, j) => (j === i ? { ...x, gain: Number(e.target.value) } : x)),
                 )
               }
-              className="range-vertical h-36"
+              className="range-vertical h-34"
             />
-            <span className="text-[0.78rem] text-ink/55">{label(b.frequency)}</span>
+            <span className="text-[0.74rem] text-muted tabular-nums">{label(b.frequency)}</span>
           </label>
         ))}
       </div>
-      <p className="mt-2 text-center text-[0.78rem] text-ink/45">Hz, gain in dB</p>
-      <div className="mt-6 flex items-center justify-between gap-2">
+      <p className="mt-1.5 text-center text-[0.74rem] text-muted">Frequency in Hz · gain in dB</p>
+      <div className="mt-5 flex items-center justify-between gap-2">
         {existing ? (
           <Button variant="danger" onClick={remove}>
             Delete
@@ -355,8 +368,8 @@ function BassWave() {
   const on = state.features?.[SWITCHES.bassWave];
   return (
     <Row
-      title="BassWave"
-      description="Extra bass that adapts to what you play."
+      title="BassWave 2.0"
+      description="Dynamic low-frequency reinforcement across the 11 mm woofer."
       status={toggle.status ?? level.status}
       control={
         <Switch
@@ -370,7 +383,7 @@ function BassWave() {
       }
     >
       {on === 1 && state.bass !== undefined && (
-        <div className="mt-3.5">
+        <div className="mt-3">
           <Range
             label="BassWave strength"
             min={-5}

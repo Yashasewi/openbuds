@@ -9,7 +9,9 @@ import {
   latestRelease,
   type Release,
 } from "../lib/links";
-import { cx } from "./ui";
+import { ConnectionBadge } from "./NowPanel";
+import { SectionHeader, cx } from "./ui";
+import { useBuds } from "../lib/store";
 
 export function GitHubMark({ className }: { className?: string }) {
   return (
@@ -19,25 +21,25 @@ export function GitHubMark({ className }: { className?: string }) {
   );
 }
 
-function DownloadIcon({ className }: { className?: string }) {
+export function DownloadIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 20 20" aria-hidden className={className} fill="none" stroke="currentColor">
       <path
         d="M10 3.5v9m0 0-3.5-3.5M10 12.5l3.5-3.5"
-        strokeWidth="1.7"
+        strokeWidth="1.6"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
       <path
         d="M4 14.5v1A1.5 1.5 0 0 0 5.5 17h9a1.5 1.5 0 0 0 1.5-1.5v-1"
-        strokeWidth="1.7"
+        strokeWidth="1.6"
         strokeLinecap="round"
       />
     </svg>
   );
 }
 
-function useRelease() {
+export function useRelease() {
   const [release, setRelease] = useState<Release>();
   const [settled, setSettled] = useState(false);
   useEffect(() => {
@@ -70,30 +72,35 @@ const megabytes = (bytes: number) => `${(bytes / 1_048_576).toFixed(1)} MB`;
 const shortDate = (date: Date) =>
   date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 
-export function SiteHeader() {
+/**
+ * Compact mobile/tablet top bar (hidden on desktop where the sticky left rail leads).
+ */
+export function MobileHeader() {
   const { release } = useRelease();
+  const { connection } = useBuds();
   return (
-    <header className="mx-auto flex max-w-[80rem] items-center justify-between gap-4 px-5 pt-5 sm:px-8 lg:px-12">
-      <a href="/" className="flex items-center gap-2.5 rounded-lg">
-        <img src="/icon.svg" alt="" className="size-8 rounded-[0.55rem] shadow-sm" />
-        <span className="text-[1.08rem] font-semibold tracking-[-0.02em]">OpenBuds</span>
+    <header className="mx-auto flex max-w-[46rem] items-center justify-between gap-3 border-b border-ink/10 px-5 py-3.5 sm:px-8 lg:hidden">
+      <a href="/" className="flex items-center gap-2">
+        <span className="size-2 rounded-full bg-tip" aria-hidden />
+        <span className="text-[0.95rem] font-semibold tracking-[-0.01em] text-ink">OpenBuds</span>
+        <ConnectionBadge connection={connection} />
       </a>
       <nav className="flex items-center gap-2">
         <a
           href={REPO}
-          className="inline-flex h-9 items-center gap-2 rounded-full px-3 text-[0.9rem] text-ink/70 transition-colors hover:bg-ink/[0.06] hover:text-ink"
+          className="inline-flex h-8 items-center gap-1.5 rounded px-2 text-[0.82rem] text-muted hover:text-ink"
         >
-          <GitHubMark className="size-4" />
+          <GitHubMark className="size-3.5" />
           <span className="hidden sm:inline">GitHub</span>
         </a>
         <a
           href={MAC_DMG}
-          className="inline-flex h-9 items-center gap-1.5 rounded-full bg-ink px-3.5 text-[0.9rem] text-sheet transition-colors hover:bg-ink/85"
+          className="inline-flex h-8 items-center gap-1.5 rounded bg-ink px-2.5 text-[0.82rem] text-sheet hover:bg-ink/85"
         >
-          <DownloadIcon className="size-4" />
+          <DownloadIcon className="size-3.5" />
           <span>
             Mac app
-            {release && <span className="ml-1.5 text-sheet/60 tabular-nums">{release.tag}</span>}
+            {release && <span className="ml-1 text-sheet/65 tabular-nums">{release.tag}</span>}
           </span>
         </a>
       </nav>
@@ -101,7 +108,96 @@ export function SiteHeader() {
   );
 }
 
-export function MacDownload({ compact }: { compact?: boolean }) {
+/**
+ * Sticky left architectural navigation rail (inspired by skills.wheresryan.sh/anatomy).
+ */
+export function LeftRail({
+  navItems,
+  showSheetToggle,
+  previewActive,
+  onTogglePreview,
+}: {
+  navItems: { id: string; label: string }[];
+  showSheetToggle?: boolean;
+  previewActive?: boolean;
+  onTogglePreview?: () => void;
+}) {
+  const { release } = useRelease();
+  const { connection } = useBuds();
+
+  return (
+    <aside className="hidden lg:block">
+      <div className="sticky top-12 flex flex-col gap-7 text-[0.84rem]">
+        <div>
+          <a href="/" className="group inline-flex items-center gap-2 text-ink">
+            <span
+              aria-hidden
+              className={cx(
+                "size-2 rounded-full transition-colors",
+                connection === "connected" ? "bg-tip" : "bg-ink/75 group-hover:bg-tip",
+              )}
+            />
+            <span className="text-[0.92rem] font-semibold tracking-[-0.015em]">OpenBuds</span>
+          </a>
+          <div className="mt-1 pl-4 text-[0.76rem] text-muted">
+            {connection === "connected" ? "Connected · live" : "OnePlus Buds 4"}
+          </div>
+        </div>
+
+        <nav aria-label="Page sections" className="flex flex-col gap-1.5 pl-4">
+          {navItems.map((item) => (
+            <a
+              key={item.id}
+              href={`#${item.id}`}
+              className="py-0.5 text-muted transition-colors hover:text-ink"
+            >
+              {item.label}
+            </a>
+          ))}
+        </nav>
+
+        {showSheetToggle && onTogglePreview && (
+          <div className="pl-4">
+            <button
+              type="button"
+              onClick={onTogglePreview}
+              className={cx(
+                "inline-flex items-center gap-1.5 rounded px-2 py-1 text-[0.78rem] transition-colors",
+                previewActive
+                  ? "bg-mint text-tip font-medium"
+                  : "bg-sheet text-muted ring-1 ring-ink/12 hover:text-ink",
+              )}
+            >
+              {previewActive ? "Viewing sample controls" : "Inspect control sheet"}
+            </button>
+          </div>
+        )}
+
+        <div className="flex flex-col gap-1.5 border-t border-ink/10 pt-4 pl-4 text-[0.78rem] text-muted">
+          <a href={MAC_DMG} className="inline-flex items-center gap-1.5 hover:text-ink">
+            <DownloadIcon className="size-3.5 text-tip" />
+            <span>
+              Download .dmg
+              {release && <span className="ml-1 text-muted/80 tabular-nums">{release.tag}</span>}
+            </span>
+          </a>
+          <a href={REPO} className="inline-flex items-center gap-1.5 hover:text-ink">
+            <GitHubMark className="size-3.5" />
+            <span>GitHub · GPL-3.0</span>
+          </a>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+export function MacDownload({
+  compact,
+  sectionIndex,
+}: {
+  compact?: boolean;
+  sectionIndex?: string;
+}) {
   const { release, settled } = useRelease();
   const beta = useBeta();
   const showBeta = settled && Boolean(beta && (!release || isNewerTag(beta.tag, release.tag)));
@@ -109,104 +205,113 @@ export function MacDownload({ compact }: { compact?: boolean }) {
     release?.tag,
     release && shortDate(release.date),
     release?.size && megabytes(release.size),
-    "macOS 26 or later",
+    "macOS 26+",
   ].filter(Boolean);
 
   return (
     <section
-      aria-labelledby="mac-app"
-      className={cx(
-        "overflow-hidden rounded-[1.6rem] border border-ink/10 bg-sheet/70 shadow-[0_1px_0_rgb(255_255_255/0.6)_inset,0_20px_50px_-30px_rgb(21_28_51/0.35)] backdrop-blur",
-        compact ? "mb-10" : "mt-14",
-      )}
+      id="mac-app"
+      aria-labelledby="mac-app-heading"
+      className={cx("scroll-mt-8", compact ? "mt-10" : "")}
     >
-      <div className="flex gap-4 p-5 sm:gap-5 sm:p-6">
-        <img
-          src="/icon.svg"
-          alt=""
-          className="size-14 shrink-0 rounded-[1rem] shadow-md sm:size-16 sm:rounded-[1.1rem]"
-        />
-        <div className="min-w-0 flex-1">
-          <h2 id="mac-app" className="text-[1.2rem] font-medium tracking-[-0.01em]">
-            OpenBuds for Mac
-          </h2>
-          <p className="mt-0.5 text-[0.92rem] text-ink/60">
-            A menu bar app with the same controls, plus Mac volume, battery alerts and open at
-            login.
-          </p>
-          <p className="mt-2 text-[0.82rem] text-ink/45 tabular-nums">{meta.join(" · ")}</p>
-          <div className="mt-4 flex flex-wrap gap-2">
+      <SectionHeader
+        id="mac-app-heading"
+        title="OpenBuds for Mac"
+        meta={sectionIndex ?? release?.tag}
+        serifMeta={Boolean(sectionIndex)}
+        description="Native macOS menu bar utility with the same read-back controls, plus Mac output volume, low-battery alerts and launch at login."
+      />
+
+      <div className="overflow-hidden rounded-[4px] border border-ink/12 bg-sheet">
+        <div className="flex flex-col gap-4 p-4.5 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+          <div className="flex items-center gap-3.5">
+            <img
+              src="/icon.svg"
+              alt=""
+              className="size-12 shrink-0 rounded-lg ring-1 ring-ink/10"
+            />
+            <div>
+              <div className="text-[0.9rem] font-medium text-ink">
+                Menu bar app for Apple silicon
+              </div>
+              <div className="mt-0.5 text-[0.78rem] text-muted tabular-nums">
+                {meta.join(" · ")}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
             <a
               href={MAC_DMG}
-              className="inline-flex h-11 items-center gap-2 rounded-xl bg-tip px-4.5 text-[0.95rem] text-sheet transition-colors hover:bg-tip/90"
+              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-tip px-3.5 text-[0.85rem] font-medium text-white transition-colors hover:bg-tip/90"
             >
-              <DownloadIcon className="size-4.5" />
-              Download for Mac
+              <DownloadIcon className="size-4" />
+              Download .dmg
             </a>
             <a
               href={release?.url ?? RELEASES}
-              className="inline-flex h-11 items-center gap-2 rounded-xl bg-ink/[0.06] px-4 text-[0.95rem] transition-colors hover:bg-ink/10"
+              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-sheet px-3 text-[0.85rem] text-ink ring-1 ring-ink/14 transition-colors hover:bg-ink/[0.025]"
             >
-              <GitHubMark className="size-4" />
+              <GitHubMark className="size-3.5" />
               Release notes
             </a>
             {showBeta && beta && (
               <a
                 href={beta.download}
-                className="inline-flex h-11 items-center rounded-xl px-3 text-[0.92rem] text-ink/55 transition-colors hover:text-tip"
+                className="inline-flex h-9 items-center rounded-md px-2.5 text-[0.82rem] text-muted hover:text-tip"
               >
-                Download beta
-                <span className="ml-1.5 tabular-nums text-ink/40">{beta.tag}</span>
+                Beta <span className="ml-1 tabular-nums">{beta.tag}</span>
               </a>
             )}
           </div>
         </div>
+
+        <details className="group border-t border-ink/[0.08] px-4.5 py-3 sm:px-5" open={!compact}>
+          <summary className="flex cursor-pointer list-none items-center justify-between text-[0.82rem] font-medium text-ink/80 marker:hidden">
+            First time opening it on macOS
+            <span className="text-muted transition-transform group-open:rotate-180" aria-hidden>
+              ⌄
+            </span>
+          </summary>
+          <ol className="mt-3 grid gap-3 text-[0.8rem] leading-relaxed text-muted sm:grid-cols-3">
+            {[
+              "Open OpenBuds.dmg and drag OpenBuds to Applications.",
+              "Launch it once. macOS warns because the build is ad-hoc signed rather than notarized; click Done.",
+              "Open System Settings → Privacy & Security and click Open Anyway. macOS remembers your choice.",
+            ].map((step, i) => (
+              <li key={step} className="flex gap-2">
+                <span className="numeral font-mono text-[0.74rem] font-medium text-tip">
+                  {i + 1}.
+                </span>
+                <span>{step}</span>
+              </li>
+            ))}
+          </ol>
+        </details>
       </div>
-      <details className="group border-t border-ink/10 px-5 py-3.5 sm:px-6" open={!compact}>
-        <summary className="flex cursor-pointer list-none items-center justify-between text-[0.9rem] text-ink/70 marker:hidden">
-          First time opening it
-          <span className="text-ink/40 transition-transform group-open:rotate-180" aria-hidden>
-            ⌄
-          </span>
-        </summary>
-        <ol className="mt-3 grid gap-3 text-[0.86rem] text-ink/60 sm:grid-cols-3">
-          {[
-            "Open the disk image and drag OpenBuds to Applications.",
-            "Open it. macOS says it can’t verify the app, because it isn’t notarized. Click Done.",
-            "In System Settings, Privacy & Security, click Open Anyway. macOS remembers this.",
-          ].map((step, i) => (
-            <li key={step} className="flex gap-2.5">
-              <span className="numeral grid size-5.5 shrink-0 place-items-center rounded-full bg-tip/10 text-[0.75rem] font-medium text-tip">
-                {i + 1}
-              </span>
-              {step}
-            </li>
-          ))}
-        </ol>
-      </details>
     </section>
   );
 }
 
 export function SiteFooter() {
   return (
-    <footer className="mx-auto max-w-[80rem] px-5 pb-10 sm:px-8 lg:px-12">
-      <div className="flex flex-col gap-3 border-t border-ink/10 pt-6 text-[0.85rem] text-ink/50 sm:flex-row sm:items-center sm:justify-between">
-        <p>
-          Independent, not affiliated with or endorsed by OnePlus or OPPO. OnePlus and OnePlus Buds
-          are trademarks of their owners, used only to identify compatible earbuds.
-          GPL-3.0-or-later. No warranty.
+    <footer className="mt-16 border-t border-ink/10 pt-6 pb-12 text-[0.78rem] leading-relaxed text-muted">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <p className="max-w-[62ch]">
+          Independent community project, not affiliated with or endorsed by OnePlus or OPPO. OnePlus
+          and OnePlus Buds are trademarks of their respective owners, used solely to state device
+          compatibility. Licensed under GPL-3.0-or-later without warranty.
         </p>
-        <div className="flex gap-4">
-          <a href={REPO} className="inline-flex items-center gap-1.5 hover:text-tip">
+        <div className="flex shrink-0 gap-4">
+          <a href={REPO} className="inline-flex items-center gap-1.5 hover:text-ink">
             <GitHubMark className="size-3.5" />
             Source
           </a>
-          <a href={RELEASES} className="hover:text-tip">
+          <a href={RELEASES} className="hover:text-ink">
             Releases
           </a>
-          <a href={ISSUES} className="hover:text-tip">
-            Report a problem
+          <a href={ISSUES} className="hover:text-ink">
+            Issues
           </a>
         </div>
       </div>

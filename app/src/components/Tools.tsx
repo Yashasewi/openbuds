@@ -1,17 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import { HEARING_LOUD, HEARING_START, HEARING_STOPS, type FitResult } from "../lib/protocol";
-import { confirm, run, session, useAction, useBuds } from "../lib/store";
+import { confirm, run, session, useAction, useBuds, usePreviewMode } from "../lib/store";
 import { Button, Dialog, Group, Row } from "./ui";
 
 const FREQUENCIES = ["250 Hz", "500 Hz", "1 kHz", "2 kHz", "4 kHz", "8 kHz"];
 
 export function Tools() {
   const { state, connection } = useBuds();
+  const preview = usePreviewMode();
+  const connected = connection === "connected";
   const find = useAction("find"),
     fit = useAction("fit"),
     golden = useAction("hearing");
   const [ringing, setRinging] = useState(false);
   const [hearingOpen, setHearingOpen] = useState(false);
+
   useEffect(() => {
     if (connection !== "connected") {
       setRinging(false);
@@ -20,6 +23,7 @@ export function Tools() {
   }, [connection]);
 
   async function ring() {
+    if (!connected) return;
     if (
       !ringing &&
       !(await confirm(
@@ -39,7 +43,9 @@ export function Tools() {
       on ? "Ringing. Stop when you find them." : "Stopped ringing",
     );
   }
+
   async function fitTest() {
+    if (!connected) return;
     if (
       !(await confirm(
         "Check the fit?",
@@ -55,43 +61,55 @@ export function Tools() {
     );
   }
 
+  const canFind = preview || session.supports(0x0400);
+  const canFit = preview || session.supports(0x0405);
+  const canHearing = preview || session.supports(0x040d);
+
   return (
-    <Group title="Tools">
-      {session.supports(0x0400) && (
+    <Group
+      title="Diagnostic tools"
+      meta="Seal & hearing"
+      description="Acoustic checks run directly on the earbuds’ internal microphones and tone generator."
+    >
+      {canFind && (
         <Row
-          title="Find earbuds"
-          description="Play a sound from both earbuds to find them."
+          title="Find my earbuds"
+          description="Emit a high-output locator tone through both drivers."
           status={find.status}
           control={
-            <Button variant={ringing ? "danger" : "quiet"} disabled={find.busy} onClick={ring}>
+            <Button
+              variant={ringing ? "danger" : "quiet"}
+              disabled={!connected || find.busy}
+              onClick={ring}
+            >
               {ringing ? "Stop ringing" : "Ring"}
             </Button>
           }
         />
       )}
-      {session.supports(0x0405) && (
+      {canFit && (
         <Row
-          title="Fit test"
+          title="Ear-tip fit test"
           status={fit.status}
           description={
             state.fit
-              ? `Last result. Left: ${state.fit.left ?? "not measured"}. Right: ${state.fit.right ?? "not measured"}.`
-              : "Check that the ear tips seal well."
+              ? `Last seal check — Left: ${state.fit.left ?? "not measured"}, Right: ${state.fit.right ?? "not measured"}.`
+              : "Measures acoustic leakage with the internal feed-back microphone."
           }
           control={
-            <Button disabled={fit.busy} onClick={fitTest}>
+            <Button disabled={!connected || fit.busy} onClick={fitTest}>
               Check fit
             </Button>
           }
         />
       )}
-      {session.supports(0x040d) && (
+      {canHearing && (
         <Row
-          title="Hearing test"
+          title="Golden Sound hearing test"
           status={golden.status}
-          description="Twelve short tones, six per ear. The result becomes your Golden Sound profile."
+          description="Twelve pure tones (250 Hz to 8 kHz, six per ear) written into your Golden Sound filter."
           control={
-            <Button disabled={golden.busy} onClick={() => setHearingOpen(true)}>
+            <Button disabled={!connected || golden.busy} onClick={() => setHearingOpen(true)}>
               Start test
             </Button>
           }
@@ -196,24 +214,24 @@ function HearingTest({ open, onClose }: { open: boolean; onClose: () => void }) 
   }
 
   return (
-    <Dialog open={open} onClose={close} title="Hearing test">
+    <Dialog open={open} onClose={close} title="Golden Sound hearing test">
       {step < 0 ? (
         <>
-          <p className="mt-3 text-[0.95rem] text-ink/70">
+          <p className="mt-3 text-[0.88rem] leading-relaxed text-ink/80">
             Sit somewhere quiet and wear both earbuds. For each tone, move the slider until you can
             only just hear it.
           </p>
-          <p className="mt-2 text-[0.88rem] text-ink/55">
-            Your earbuds keep one profile. Finishing replaces the current one.
+          <p className="mt-2 text-[0.82rem] text-muted">
+            Your earbuds store one profile. Finishing replaces the current one.
           </p>
         </>
       ) : (
         <>
           <div className="mt-4 flex items-baseline justify-between">
-            <p className="text-[1rem]">
-              {step < 6 ? "Left ear" : "Right ear"}, {FREQUENCIES[step % 6]}
+            <p className="text-[0.92rem] font-medium">
+              {step < 6 ? "Left ear" : "Right ear"} · {FREQUENCIES[step % 6]}
             </p>
-            <p className="numeral text-[0.9rem] text-ink/55 tabular-nums">{step + 1} of 12</p>
+            <p className="numeral text-[0.82rem] text-muted tabular-nums">{step + 1} of 12</p>
           </div>
           <div className="mt-3 flex gap-1" aria-hidden>
             {Array.from({ length: 12 }, (_, i) => (
@@ -223,7 +241,7 @@ function HearingTest({ open, onClose }: { open: boolean; onClose: () => void }) 
               />
             ))}
           </div>
-          <div className="mt-7">
+          <div className="mt-6">
             <input
               key={step}
               type="range"
@@ -251,14 +269,14 @@ function HearingTest({ open, onClose }: { open: boolean; onClose: () => void }) 
                 timer.current = setTimeout(() => void play(step, v), 300);
               }}
             />
-            <div className="mt-1.5 flex justify-between text-[0.8rem] text-ink/50">
+            <div className="mt-1.5 flex justify-between text-[0.76rem] text-muted">
               <span>Quieter</span>
               <span>Louder</span>
             </div>
           </div>
         </>
       )}
-      <p aria-live="polite" className="mt-4 min-h-[1.3em] text-[0.88rem] text-warn">
+      <p aria-live="polite" className="mt-4 min-h-[1.3em] text-[0.82rem] text-warn">
         {note}
       </p>
       <div className="mt-4 flex justify-between gap-2">

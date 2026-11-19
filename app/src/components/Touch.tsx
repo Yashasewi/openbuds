@@ -35,19 +35,20 @@ export function Touch() {
 
   return (
     <Group
-      title="Touch controls"
-      description="What each touch does. Each earbud has its own controls."
+      title="Stem touch controls"
+      meta={`${ear} earbud`}
+      description="Capacitive taps, long-hold mode cycle and vertical volume swipe on each stem."
     >
-      <div className="py-4">
-        <div className="max-w-[16rem]">
+      <div className="py-3.5">
+        <div className="max-w-[15rem]">
           <Segmented<Ear>
             size="sm"
             label="Earbud"
             value={ear}
             onChange={setEar}
             options={[
-              { value: "Left", label: "Left earbud" },
-              { value: "Right", label: "Right earbud" },
+              { value: "Left", label: "Left stem" },
+              { value: "Right", label: "Right stem" },
             ]}
           />
         </div>
@@ -64,9 +65,9 @@ export function Touch() {
         <GestureRow key={`${ear}-${action}`} ear={ear} action={action} fn={slot!.fn} />
       ))}
       {calls.length > 0 && (
-        <div className="pt-5 pb-1">
-          <h3 className="text-[0.95rem] font-medium text-ink">During calls</h3>
-          <p className="text-[0.85rem] text-ink/55">These apply to both earbuds.</p>
+        <div className="pt-4 pb-1">
+          <h3 className="text-[0.86rem] font-semibold text-ink">During phone calls</h3>
+          <p className="text-[0.78rem] text-muted">Shared across both earbuds.</p>
         </div>
       )}
       {calls.map(([action, slot]) => (
@@ -102,9 +103,9 @@ function GestureRow({ ear, action, fn }: { ear: Ear; action: number; fn: number 
 function HoldCycle({ modes }: { modes: HoldMode[] }) {
   const { busy, status } = useAction("holdCycle");
   return (
-    <div className="mt-3.5">
-      <p className="text-[0.85rem] text-ink/60">Modes to cycle through, on both earbuds</p>
-      <div className="mt-2 flex flex-wrap gap-2">
+    <div className="mt-3">
+      <p className="text-[0.8rem] text-muted">Modes included in long-hold cycle (both stems)</p>
+      <div className="mt-2 flex flex-wrap gap-1.5">
         {HOLD_MODES.map(({ mode, label }) => {
           const on = modes.includes(mode),
             last = on && modes.length === 1;
@@ -122,19 +123,21 @@ function HoldCycle({ modes }: { modes: HoldMode[] }) {
                 )
               }
               className={cx(
-                "inline-flex h-9 items-center gap-2 rounded-full pr-3.5 pl-2.5 text-[0.88rem] transition-colors disabled:cursor-not-allowed",
-                on ? "bg-mint/50 text-tip" : "bg-ink/[0.06] text-ink/65 hover:bg-ink/10",
+                "inline-flex h-8 items-center gap-1.5 rounded-md pr-3 pl-2 text-[0.82rem] transition-colors disabled:cursor-not-allowed",
+                on
+                  ? "bg-mint/60 text-tip ring-1 ring-tip/35"
+                  : "bg-fog text-muted ring-1 ring-ink/10 hover:text-ink",
                 busy && "opacity-60",
               )}
             >
               <span
                 className={cx(
-                  "grid size-4 place-items-center rounded-full border transition-colors",
-                  on ? "border-tip bg-tip" : "border-ink/30",
+                  "grid size-3.5 place-items-center rounded-[3px] border transition-colors",
+                  on ? "border-tip bg-tip" : "border-ink/25 bg-sheet",
                 )}
               >
                 {on && (
-                  <svg aria-hidden viewBox="0 0 12 12" className="size-2.5 text-sheet">
+                  <svg aria-hidden viewBox="0 0 12 12" className="size-2.5 text-white">
                     <path
                       d="m2.5 6.2 2.3 2.3 4.7-5"
                       fill="none"

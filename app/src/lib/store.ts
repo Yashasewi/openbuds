@@ -1,12 +1,97 @@
-import { useSyncExternalStore } from "react";
-import { BudsSession } from "./session";
+import { createContext, useContext, useSyncExternalStore } from "react";
+import { BudsSession, type Snapshot } from "./session";
+import { EQ_BANDS, SWITCHES } from "./protocol";
 
 export const session = new BudsSession((event, details) => {
   if (import.meta.env.DEV) console.debug(event, details ?? "");
 });
 
+// Optional read-only sample snapshot so visitors without earbuds connected can inspect the workbench UI.
+export const SAMPLE_SNAPSHOT: Snapshot = {
+  connection: "disconnected",
+  reason:
+    "Sample Buds 4 readout. Connect your earbuds in Google Chrome to read and change live settings.",
+  live: false,
+  state: {
+    model: "065414",
+    firmware: "138.138.105",
+    codec: 2, // AAC on macOS
+    battery: {
+      left: { percent: 94, charging: false },
+      right: { percent: 91, charging: false },
+      case: { percent: 78, charging: false },
+    },
+    wearing: {
+      left: { raw: 3, inEar: true, inCase: false, lidOpen: true },
+      right: { raw: 3, inEar: true, inCase: false, lidOpen: true },
+      case: { raw: 4, inEar: false, inCase: true, lidOpen: true },
+    },
+    noise: { mode: "smart", name: "Noise cancelling, smart", raw: 128 },
+    smartLevel: "deep",
+    holdCycle: { modes: ["anc", "adaptive", "transparency"], mask: 0x806 },
+    eq: 0,
+    customPresets: [
+      {
+        id: 3,
+        name: "Studio flat",
+        bands: EQ_BANDS.map((frequency, i) => ({
+          frequency,
+          gain: [1, 0, 0, 1, 2, 1][i] ?? 0,
+        })),
+      },
+    ],
+    bass: 2,
+    promptVolume: 7,
+    golden: {
+      name: "Ear scan profile",
+      uid: 1,
+      values: [-25, -25, -19, -19, -25, -19, -25, -25, -19, -19, -25, -19],
+    },
+    fit: { left: "Good seal", right: "Good seal" },
+    features: {
+      [SWITCHES.wearDetection]: 1,
+      [SWITCHES.gameMode]: 0,
+      [SWITCHES.goldenSound]: 1,
+      [SWITCHES.dualConnection]: 1,
+      [SWITCHES.hiRes]: 0,
+      [SWITCHES.spatial]: 0,
+      [SWITCHES.smartVolume]: 1,
+      [SWITCHES.bassWave]: 1,
+    },
+    gestures: [
+      { device: 1, side: "Left", button: 1, action: 1, fn: 1 },
+      { device: 1, side: "Left", button: 1, action: 2, fn: 6 },
+      { device: 1, side: "Left", button: 1, action: 3, fn: 5 },
+      { device: 1, side: "Left", button: 1, action: 5, fn: 7 },
+      { device: 1, side: "Left", button: 1, action: 4, fn: 8 },
+      { device: 2, side: "Right", button: 2, action: 1, fn: 1 },
+      { device: 2, side: "Right", button: 2, action: 2, fn: 6 },
+      { device: 2, side: "Right", button: 2, action: 3, fn: 5 },
+      { device: 2, side: "Right", button: 2, action: 5, fn: 7 },
+      { device: 2, side: "Right", button: 2, action: 4, fn: 8 },
+      { device: 4, side: "Both", button: 6, action: 2, fn: 29 },
+      { device: 4, side: "Both", button: 6, action: 6, fn: 28 },
+    ],
+    devices: [
+      { name: "MacBook Pro", connected: true, playing: true, thisDevice: true },
+      { name: "OnePlus 13", connected: true, playing: false, thisDevice: false },
+    ],
+    errors: {},
+    updatedAt: new Date().toISOString(),
+  },
+};
+
+export const PreviewControlsContext = createContext(false);
+
+export function usePreviewMode() {
+  return useContext(PreviewControlsContext);
+}
+
 export function useBuds() {
-  return useSyncExternalStore(session.subscribe, session.getSnapshot);
+  const real = useSyncExternalStore(session.subscribe, session.getSnapshot);
+  const preview = useContext(PreviewControlsContext);
+  if (!real.state.model && preview) return SAMPLE_SNAPSHOT;
+  return real;
 }
 
 // After the user presses Disconnect, stay disconnected until they connect again.

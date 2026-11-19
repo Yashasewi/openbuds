@@ -25,13 +25,13 @@ export function Switch({
       disabled={disabled || on === undefined}
       onClick={() => onChange(!on)}
       className={cx(
-        "relative h-7 w-12 shrink-0 rounded-full transition-colors duration-200 disabled:opacity-40",
-        on ? "bg-tip" : "bg-ink/15",
+        "relative h-6 w-11 shrink-0 rounded-full transition-colors duration-150 disabled:opacity-40",
+        on ? "bg-tip" : "bg-ink/14 ring-1 ring-inset ring-ink/12",
       )}
     >
       <span
         className={cx(
-          "absolute top-1 left-1 size-5 rounded-full bg-sheet shadow-[0_1px_2px_rgb(21_28_51/0.25)] transition-transform duration-200",
+          "absolute top-0.75 left-0.75 size-4.5 rounded-full bg-sheet shadow-[0_1px_2px_rgb(23_25_24/0.22)] transition-transform duration-150",
           on && "translate-x-5",
         )}
       />
@@ -59,8 +59,8 @@ export function Segmented<T extends string>({
       role="radiogroup"
       aria-label={label}
       className={cx(
-        "gap-1 bg-ink/[0.06] p-1",
-        size === "md" ? "flex rounded-2xl" : "grid rounded-xl",
+        "gap-1 rounded-md bg-ink/[0.055] p-0.75 ring-1 ring-inset ring-ink/[0.07]",
+        size === "md" ? "flex flex-wrap sm:flex-nowrap" : "grid",
       )}
       style={
         size === "sm"
@@ -79,13 +79,13 @@ export function Segmented<T extends string>({
             disabled={disabled}
             onClick={() => !selected && onChange(o.value)}
             className={cx(
-              "rounded-xl px-2 text-center leading-tight transition-colors duration-200 disabled:cursor-not-allowed",
+              "rounded-[4px] px-2.5 text-center leading-tight transition-colors duration-150 disabled:cursor-not-allowed",
               size === "md"
-                ? "min-h-12 flex-auto px-2.5 py-2 text-[0.88rem] whitespace-nowrap"
-                : "min-h-9 rounded-lg py-1.5 text-sm",
+                ? "min-h-9 flex-auto py-1.5 text-[0.84rem] whitespace-nowrap"
+                : "min-h-8 py-1 text-[0.8rem]",
               selected
-                ? "bg-sheet text-ink shadow-[0_1px_3px_rgb(21_28_51/0.12)]"
-                : "text-ink/65 hover:text-ink disabled:hover:text-ink/65",
+                ? "bg-sheet font-medium text-ink shadow-[0_1px_2px_rgb(23_25_24/0.08),0_0_0_1px_rgb(23_25_24/0.08)]"
+                : "text-muted hover:text-ink disabled:hover:text-muted",
             )}
           >
             {o.label}
@@ -116,7 +116,7 @@ export function Select({
         value={value ?? ""}
         disabled={disabled}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="h-10 appearance-none rounded-xl bg-ink/[0.06] py-0 pr-9 pl-3.5 text-[0.95rem] text-ink transition-colors hover:bg-ink/10 disabled:opacity-50"
+        className="h-9 appearance-none rounded-md bg-fog py-0 pr-8 pl-3 text-[0.86rem] text-ink ring-1 ring-ink/14 transition-colors hover:ring-ink/28 disabled:opacity-50"
       >
         {value !== undefined && !options.some((o) => o.value === value) && (
           <option value={value}>Other ({value})</option>
@@ -130,13 +130,13 @@ export function Select({
       <svg
         aria-hidden
         viewBox="0 0 12 12"
-        className="pointer-events-none absolute top-1/2 right-3 size-3 -translate-y-1/2 text-ink/60"
+        className="pointer-events-none absolute top-1/2 right-2.5 size-3 -translate-y-1/2 text-muted"
       >
         <path
           d="M2.5 4.5 6 8l3.5-3.5"
           fill="none"
           stroke="currentColor"
-          strokeWidth="1.6"
+          strokeWidth="1.5"
           strokeLinecap="round"
           strokeLinejoin="round"
         />
@@ -171,7 +171,7 @@ export function Range({
   }, [shown, value, format]);
   const fill = (v: number) => `${((v - min) / (max - min)) * 100}%`;
   return (
-    <div className="flex w-full items-center gap-4">
+    <div className="flex w-full items-center gap-3.5">
       <input
         ref={ref}
         type="range"
@@ -193,34 +193,69 @@ export function Range({
         }}
         className="range min-w-0 flex-1"
       />
-      <output ref={out} className="numeral w-10 text-right text-lg tabular-nums">
+      <output ref={out} className="numeral w-9 text-right text-[0.95rem] text-ink tabular-nums">
         {value === undefined ? "–" : format(shown)}
       </output>
     </div>
   );
 }
 
+export function SectionHeader({
+  id,
+  title,
+  meta,
+  serifMeta,
+  description,
+}: {
+  id?: string;
+  title: string;
+  meta?: string;
+  serifMeta?: boolean;
+  description?: string;
+}) {
+  return (
+    <div className="mb-3.5">
+      <div className="flex items-baseline gap-3.5">
+        <h2 id={id} className="text-[0.94rem] font-semibold tracking-[-0.01em] text-ink">
+          {title}
+        </h2>
+        <span className="h-px flex-1 bg-ink/10" aria-hidden />
+        {meta && (
+          <span
+            className={cx(
+              "shrink-0 text-muted",
+              serifMeta ? "font-serif text-[0.92rem] italic" : "text-[0.78rem] tabular-nums",
+            )}
+          >
+            {meta}
+          </span>
+        )}
+      </div>
+      {description && (
+        <p className="mt-1.5 max-w-[60ch] text-[0.86rem] leading-relaxed text-muted">
+          {description}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function Group({
   title,
+  meta,
   description,
   children,
 }: {
   title: string;
+  meta?: string;
   description?: string;
   children: ReactNode;
 }) {
   const id = useId();
   return (
-    <section aria-labelledby={id} className="scroll-mt-6">
-      <div className="mb-3 px-1">
-        <h2 id={id} className="text-[1.35rem] font-medium tracking-[-0.01em] text-ink">
-          {title}
-        </h2>
-        {description && (
-          <p className="mt-0.5 max-w-[56ch] text-[0.92rem] text-ink/60">{description}</p>
-        )}
-      </div>
-      <div className="divide-y divide-ink/[0.08] rounded-[1.4rem] bg-sheet px-5 shadow-[0_1px_0_rgb(21_28_51/0.04)]">
+    <section aria-labelledby={id} className="scroll-mt-8">
+      <SectionHeader id={id} title={title} meta={meta} description={description} />
+      <div className="divide-y divide-ink/[0.08] rounded-[4px] border border-ink/12 bg-sheet px-4.5">
         {children}
       </div>
     </section>
@@ -243,14 +278,17 @@ export function Row({
   stack?: boolean;
 }) {
   return (
-    <div className="py-4">
+    <div className="py-3.5">
       <div
-        className={cx("flex gap-x-6 gap-y-3", stack ? "flex-col" : "items-center justify-between")}
+        className={cx(
+          "flex gap-x-6 gap-y-2.5",
+          stack ? "flex-col" : "items-center justify-between",
+        )}
       >
         <div className="min-w-0">
-          <div className="text-[1rem] text-ink">{title}</div>
+          <div className="text-[0.9rem] font-medium text-ink">{title}</div>
           {description && (
-            <div className="mt-0.5 max-w-[52ch] text-[0.88rem] leading-snug text-ink/60">
+            <div className="mt-0.5 max-w-[54ch] text-[0.83rem] leading-relaxed text-muted">
               {description}
             </div>
           )}
@@ -267,13 +305,13 @@ export function Status({ status }: { status?: ActionState }) {
   return (
     <div aria-live="polite" className="empty:hidden">
       {status?.phase === "pending" && (
-        <p className="mt-2.5 flex items-center gap-2 text-[0.85rem] text-tip">
+        <p className="mt-2 flex items-center gap-2 text-[0.8rem] text-tip">
           <span className="pulse size-1.5 rounded-full bg-tip" />
           Waiting for the earbuds to confirm
         </p>
       )}
       {status?.phase === "done" && (
-        <p className="mt-2.5 flex items-center gap-2 text-[0.85rem] text-tip">
+        <p className="mt-2 flex items-center gap-1.5 text-[0.8rem] text-tip">
           <svg aria-hidden viewBox="0 0 12 12" className="size-3">
             <path
               d="m2.5 6.2 2.3 2.3 4.7-5"
@@ -288,7 +326,7 @@ export function Status({ status }: { status?: ActionState }) {
         </p>
       )}
       {status?.phase === "error" && (
-        <p className="mt-2.5 rounded-xl bg-amber/15 px-3 py-2 text-[0.85rem] text-warn">
+        <p className="mt-2 rounded bg-amber/12 px-3 py-1.5 text-[0.8rem] text-warn ring-1 ring-amber/25">
           {status.message}
         </p>
       )}
@@ -307,10 +345,11 @@ export function Button({
       type="button"
       {...props}
       className={cx(
-        "inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-[0.95rem] whitespace-nowrap transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-45",
-        variant === "primary" && "bg-tip text-sheet hover:bg-tip/90",
-        variant === "quiet" && "bg-ink/[0.06] text-ink hover:bg-ink/10",
-        variant === "danger" && "bg-amber/15 text-warn hover:bg-amber/25",
+        "inline-flex h-9 items-center justify-center gap-2 rounded-md px-3.5 text-[0.86rem] whitespace-nowrap transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-45",
+        variant === "primary" && "bg-tip font-medium text-white hover:bg-tip/90",
+        variant === "quiet" &&
+          "bg-sheet text-ink ring-1 ring-ink/14 hover:bg-ink/[0.025] hover:ring-ink/28",
+        variant === "danger" && "bg-amber/14 text-warn ring-1 ring-amber/30 hover:bg-amber/22",
         className,
       )}
     >
@@ -348,13 +387,13 @@ export function Dialog({
         onClose();
       }}
       className={cx(
-        "sheet-dialog m-auto w-[min(100vw-2rem,var(--w))] rounded-[1.6rem] bg-sheet p-0 text-ink",
-        wide ? "[--w:34rem]" : "[--w:26rem]",
+        "sheet-dialog m-auto w-[min(100vw-2rem,var(--w))] rounded-md bg-sheet p-0 text-ink",
+        wide ? "[--w:32rem]" : "[--w:25rem]",
       )}
     >
       {open && (
-        <div className="p-6">
-          <h2 className="text-xl font-medium tracking-[-0.01em]">{title}</h2>
+        <div className="p-5 sm:p-6">
+          <h2 className="text-[1.02rem] font-semibold tracking-[-0.01em]">{title}</h2>
           {children}
         </div>
       )}
