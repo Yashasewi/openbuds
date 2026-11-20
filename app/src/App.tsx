@@ -19,7 +19,8 @@ const SECTIONS = [
 export function App() {
   const { connection, state } = useBuds();
   const connected = connection === "connected";
-  const hasData = !!state.model;
+  const hasData = !!state.profile;
+  const unsupported = state.unsupported;
 
   return (
     <>
@@ -76,6 +77,11 @@ export function App() {
               </div>
               <MacDownload compact />
             </>
+          ) : unsupported ? (
+            <p className="lg:pt-16 max-w-[48ch] text-[1.05rem] text-ink/70">
+              These earbuds (model {unsupported.productId}) aren’t supported yet, so OpenBuds only
+              reads them. Use Copy diagnostics on the left and attach it to a GitHub issue.
+            </p>
           ) : (
             <Intro />
           )}
@@ -91,13 +97,13 @@ function Intro() {
   const steps = [
     [
       "Pair them with this Mac",
-      "Open Bluetooth settings and connect your OnePlus Buds 4 as usual.",
+      "Open Bluetooth settings and connect your OnePlus earbuds as usual.",
     ],
     [
       "Use Google Chrome",
       "Chrome can talk to the earbuds over Bluetooth. Other browsers can’t yet.",
     ],
-    ["Connect", "Press Connect earbuds and choose OnePlus Buds 4 from the list."],
+    ["Connect", "Press Connect earbuds and choose your OnePlus earbuds from the list."],
   ];
   return (
     <div className="lg:pt-16">

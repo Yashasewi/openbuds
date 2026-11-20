@@ -1,6 +1,5 @@
 // Protocol facts: PROTOCOL.md.
 export const SERVICE = "0000079a-d102-11e1-9b23-00025b00a5a5";
-export const MODEL = "065414";
 
 export type Bytes = number[];
 const isByte = (x: number) => Number.isInteger(x) && x >= 0 && x <= 255;
@@ -36,10 +35,9 @@ export const NOISE_SET_BITS = {
 export type NoiseMode = keyof typeof NOISE_SET_BITS;
 export const ANC_LEVELS = ["smart", "deep", "medium", "light"] as const;
 export type AncLevel = (typeof ANC_LEVELS)[number];
-const NOISE_SET_ALLOWED: number[] = Object.values(NOISE_SET_BITS);
 export const HOLD_CYCLE_BITS = { off: 0, anc: 1, transparency: 2, adaptive: 11 } as const;
 export type HoldMode = keyof typeof HOLD_CYCLE_BITS;
-const HOLD_CYCLE_MASK = Object.values(HOLD_CYCLE_BITS).reduce<number>((m, b) => m | (1 << b), 0);
+const bitMask = (bits: readonly number[]) => bits.reduce<number>((m, b) => m | (1 << b), 0);
 // Switch ids returned by this firmware's 0x010D reply.
 export const SWITCHES = {
   wearDetection: 4,
@@ -51,9 +49,6 @@ export const SWITCHES = {
   smartVolume: 28,
   bassWave: 29,
 } as const;
-const SWITCH_IDS = new Set<number>(Object.values(SWITCHES));
-// Measured Buds 4 function bytes; a whole-table write can carry any of them back unchanged.
-const KNOWN_FUNCTIONS = new Set([0, 1, 3, 5, 6, 7, 8, 10, 11, 12, 17, 28, 29]);
 export const HEARING_STOPS = [
   -120, -88, -55, -52, -49, -45, -41, -38, -35, -30, -25, -22, -19, -15, -11, -8, -5, -1, 3, 5, 7,
   10, 13, 15, 17,
@@ -74,18 +69,17 @@ const validHearingInfo = (p: Bytes) =>
       HEARING_RESULTS.includes(signed(value)),
   );
 const ascii = (p: Bytes, max = 32) => p.length <= max && p.every((b) => b >= 32 && b < 127);
-function validNoiseSet(p: Bytes) {
+// `noiseBits` are the SET bits the model may be sent; `holdMask` is 0 for a model with no hold cycle.
+const validNoiseSet = (noiseBits: readonly number[], holdMask: number) => (p: Bytes) => {
   if (p[0] === 1 && p[1] === 1)
-    return NOISE_SET_ALLOWED.some(
-      (b) => p.length === 3 + Math.floor(b / 8) && le(p.slice(2)) === 2 ** b,
-    );
-  if (p[0] === 2 && p[1] === 1 && p.length >= 3 && p.length <= 6) {
+    return noiseBits.some((b) => p.length === 3 + Math.floor(b / 8) && le(p.slice(2)) === 2 ** b);
+  if (holdMask && p[0] === 2 && p[1] === 1 && p.length >= 3 && p.length <= 6) {
     const mask = le(p.slice(2));
-    return mask > 0 && !(mask & ~HOLD_CYCLE_MASK) && same(p.slice(2), minimalLE(mask));
+    return mask > 0 && !(mask & ~holdMask) && same(p.slice(2), minimalLE(mask));
   }
   return false;
-}
-function validGestureTable(p: Bytes) {
+};
+const validGestureTable = (known: ReadonlySet<number>) => (p: Bytes) => {
   if (p[0] < 1 || p[0] > 64 || p.length !== 1 + p[0] * 4) return false;
   for (let i = 1; i < p.length; i += 4) {
     const [dev, button, action, fn] = p.slice(i, i + 4);
@@ -95,12 +89,12 @@ function validGestureTable(p: Bytes) {
       button > 6 ||
       action < 1 ||
       action > 6 ||
-      !KNOWN_FUNCTIONS.has(fn)
+      !known.has(fn)
     )
       return false;
   }
   return true;
-}
+};
 function validCustomEq(p: Bytes) {
   if (![1, 2, 3].includes(p[0]) || p[1] !== s8(-EQ_GAIN) || p[2] !== EQ_GAIN) return false;
   const nameLength = p[4];
@@ -127,17 +121,14 @@ const validRecord = (p: Bytes) =>
   validHearingInfo(p.slice(2, 38)) &&
   ascii(p.slice(42));
 
-// Allowlist: every command and payload shape this client may send. Firmware/OTA, resets, pairing,
-// ear scans, cloud features and anything undocumented for Buds 4 are absent and therefore rejected.
-const COMMANDS = new Map<number, (p: Bytes) => boolean>([
+// Payload shapes that do not vary by model. A model's allow-list picks from these by command.
+const FIXED_SHAPES = new Map<number, (p: Bytes) => boolean>([
   [0x0100, empty],
   [0x0103, empty],
   [0x0105, empty],
   [0x0106, empty],
   [0x0108, empty],
   [0x0109, empty],
-  [0x010c, (p) => p.length === 2 && [1, 2, 4].includes(p[0]) && p[1] === 1],
-  [0x010d, (p) => p.length > 1 && p[0] === p.length - 1],
   [0x010f, empty],
   [0x0112, empty],
   [0x0114, empty],
@@ -156,11 +147,7 @@ const COMMANDS = new Map<number, (p: Bytes) => boolean>([
       new Set(p.slice(1)).size === p.length - 1,
   ],
   [0x0400, oneOf([0], [1])],
-  [0x0401, validGestureTable],
-  [0x0403, (p) => p.length === 2 && SWITCH_IDS.has(p[0]) && p[1] <= 1],
-  [0x0404, validNoiseSet],
   [0x0405, oneOf([0], [1])],
-  [0x0406, (p) => p.length === 1 && p[0] <= 15],
   [0x040d, oneOf([2, 0], [2, 1])],
   [0x040e, (p) => same(p, [4]) || validTone(p) || validRecord(p)],
   [0x0411, (p) => p.length === 5 && same(p.slice(0, 4), [1, 1, 1, 0]) && p[4] > 0],
@@ -168,13 +155,233 @@ const COMMANDS = new Map<number, (p: Bytes) => boolean>([
   [0x0418, validCustomEq],
   [0x041b, (p) => p.length === 3 && p[0] === 0xfb && p[1] === 5 && Math.abs(signed(p[2])) <= 5],
   [0x0427, (p) => p.length === 1 && p[0] >= 1 && p[0] <= 10],
+  // Our answer to the buds' 0x0500 time request: 00 <unix seconds u32 LE> (see answerTime).
+  [0x8500, (p) => p.length === 5 && p[0] === 0],
 ]);
+
+export interface EqPreset {
+  id: number;
+  label: string;
+  note?: string;
+}
+export interface ModelProfile {
+  /** Six hex digits from the 0x8103 reply, e.g. "065414". */
+  productId: string;
+  displayName: string;
+  /** No owner has verified every write path yet; the UI says so. */
+  experimental: boolean;
+  testedFirmware: readonly string[];
+  /** Commands this model may be sent, with a payload check each. Everything else is refused. */
+  commands: ReadonlyMap<number, (p: Bytes) => boolean>;
+  noiseModes: readonly NoiseMode[];
+  /** Empty: the model has no touch-and-hold cycle, so none is read, written or shown. */
+  holdModes: readonly HoldMode[];
+  /** Switch ids the model reports in 0x010D (shown) and the subset that may be written (0x0403). */
+  switchesReadable: readonly number[];
+  switchesWritable: readonly number[];
+  /** Ids sent in 0x010D; the count byte is prepended. */
+  featureQuery: readonly number[];
+  eqPresets: readonly EqPreset[];
+  customEq: boolean;
+  gestureMenus: Record<number, number[]>;
+  callMenus: Record<number, number[]>;
+  /** "table": 0x0401 carries every slot (Buds 4). "slot": only the changed slot (the form captured on Buds 3). */
+  gestureWrite: "table" | "slot";
+  /** Function bytes a gesture table may carry. */
+  gestureFunctions: readonly number[];
+}
+
+interface ProfileShape {
+  commands: readonly number[];
+  /** 0x010C kinds that may be read: 1 noise, 2 hold cycle, 4 Smart level. */
+  noiseReads: readonly number[];
+  /** Restricts the ids of a 0x010D read. null: any id (Buds 4 today). */
+  featureReadIds: readonly number[] | null;
+  /** Highest preset id 0x0406 may set. */
+  eqMaxId: number;
+}
+// Allowlist builder: every command and payload shape a model may be sent. Firmware/OTA, resets, pairing,
+// ear scans, cloud features and anything not documented for the model are absent and therefore rejected.
+function allowList(
+  profile: Pick<
+    ModelProfile,
+    "noiseModes" | "holdModes" | "switchesWritable" | "gestureFunctions" | "eqPresets"
+  >,
+  shape: ProfileShape,
+) {
+  const noiseBits = profile.noiseModes.map((m) => NOISE_SET_BITS[m]);
+  const holdMask = bitMask(profile.holdModes.map((m) => HOLD_CYCLE_BITS[m]));
+  const known = new Set(profile.gestureFunctions);
+  const writable = new Set(profile.switchesWritable);
+  const readIds = shape.featureReadIds && new Set(shape.featureReadIds);
+  const varying = new Map<number, (p: Bytes) => boolean>([
+    [0x010c, (p) => p.length === 2 && shape.noiseReads.includes(p[0]) && p[1] === 1],
+    [
+      0x010d,
+      (p) =>
+        p.length > 1 &&
+        p[0] === p.length - 1 &&
+        (!readIds || p.slice(1).every((id) => readIds.has(id))),
+    ],
+    [0x0401, validGestureTable(known)],
+    [0x0403, (p) => p.length === 2 && writable.has(p[0]) && p[1] <= 1],
+    [0x0404, validNoiseSet(noiseBits, holdMask)],
+    [0x0406, (p) => p.length === 1 && p[0] <= shape.eqMaxId],
+  ]);
+  return new Map(
+    shape.commands.map((c) => {
+      const valid = varying.get(c) ?? FIXED_SHAPES.get(c);
+      if (!valid) throw Error(`No payload check for ${c.toString(16)}`);
+      return [c, valid] as const;
+    }),
+  );
+}
+function makeProfile(base: Omit<ModelProfile, "commands">, shape: ProfileShape): ModelProfile {
+  return { ...base, commands: allowList(base, shape) };
+}
+
+const ALL_NOISE = Object.keys(NOISE_SET_BITS) as NoiseMode[];
+
+// OnePlus Buds 4. Every value here is what OpenBuds sent before profiles existed (see PROTOCOL.md, "Per-model differences").
+const BUDS4 = makeProfile(
+  {
+    productId: "065414",
+    displayName: "OnePlus Buds 4",
+    experimental: false,
+    testedFirmware: ["138.138.105"],
+    noiseModes: ALL_NOISE,
+    holdModes: Object.keys(HOLD_CYCLE_BITS) as HoldMode[],
+    switchesReadable: Object.values(SWITCHES),
+    switchesWritable: Object.values(SWITCHES),
+    featureQuery: [5, 4, 11, 17, 24, 6, 27, 29, 28],
+    eqPresets: [
+      { id: 0, label: "Balanced", note: "Even across the range" },
+      { id: 1, label: "Serenade", note: "Brighter voices" },
+      { id: 2, label: "Bass", note: "Fuller low end" },
+    ],
+    customEq: true,
+    // Call menus: QuickBuds captures (QuickBuds docs/PROTOCOL.md:1009). Gesture lists: no independent source; QuickBuds' Buds 4 menu entry (line 1013) is a comparison with the vendor app, not a capture. TODO: re-verify each list with a capture.
+    gestureMenus: {
+      1: [0, 1],
+      2: [0, 1, 5, 6, 3, 17],
+      3: [0, 5, 6, 3, 17],
+      5: [0, 7, 10],
+      4: [0, 8],
+    },
+    callMenus: { 2: [0, 29], 6: [0, 28] },
+    gestureWrite: "table",
+    // Measured Buds 4 function bytes; a whole-table write can carry any of them back unchanged.
+    gestureFunctions: [0, 1, 3, 5, 6, 7, 8, 10, 11, 12, 17, 28, 29],
+  },
+  {
+    commands: [
+      0x0100, 0x0103, 0x0105, 0x0106, 0x0108, 0x0109, 0x010c, 0x010d, 0x010f, 0x0112, 0x0114,
+      0x0115, 0x0122, 0x0124, 0x0130, 0x0200, 0x0116, 0x0205, 0x0400, 0x0401, 0x0403, 0x0404,
+      0x0405, 0x0406, 0x040d, 0x040e, 0x0411, 0x0413, 0x0418, 0x041b, 0x0427, 0x8500,
+    ],
+    noiseReads: [1, 2, 4],
+    featureReadIds: null,
+    eqMaxId: 15,
+  },
+);
+
+// OnePlus Buds 3. Source for every entry: owner capture, OnePlus Buds 3 fw 127.127.101, 2026-10-12
+// (RFCOMM channel 15, SDP 0000079A), by Himanshu Singh. Nothing here is copied from another project or app.
+// Anything that capture did not exercise is absent, so it cannot be sent.
+const BUDS3 = makeProfile(
+  {
+    productId: "063c14",
+    displayName: "OnePlus Buds 3",
+    experimental: true,
+    testedFirmware: ["127.127.101"],
+    // Set and read back in the capture: Off 0, ANC 1, Transparency 2, Deep 4, Medium 5, Light 6, Smart 7.
+    // Adaptive (bit 11) was never tried, so it is not offered.
+    noiseModes: ["off", "anc", "transparency", "deep", "medium", "light", "smart"],
+    // Hold cycle (0x010C 02 01, 0x0404 02 01) was never captured.
+    holdModes: [],
+    // 0x010D answered for ids 6, 4 and 17. 6 and 4 were written and read back; 17 (dual connection) was not
+    // written, because it could drop the link.
+    switchesReadable: [SWITCHES.gameMode, SWITCHES.wearDetection, SWITCHES.dualConnection],
+    switchesWritable: [SWITCHES.gameMode, SWITCHES.wearDetection],
+    featureQuery: [6, 4, 17],
+    // 0x0406 ids 0..3 were each acknowledged and read back through 0x010F. The preset names are not
+    // taken from any vendor app, so these labels are neutral. TODO: owner to confirm names from the phone app.
+    eqPresets: [0, 1, 2, 3].map((id) => ({
+      id,
+      label: `Preset ${id + 1}`,
+      note: "Name not confirmed",
+    })),
+    // Custom EQ (0x0122, 0x0418) was never captured.
+    customEq: false,
+    // Same menus as Buds 4 without function 17 (game mode), which the capture did not show on this model.
+    gestureMenus: { 1: [0, 1], 2: [0, 1, 5, 6, 3], 3: [0, 5, 6, 3], 5: [0, 7, 10], 4: [0, 8] },
+    // The 0x0108 table has no button-6 (call) entries on Buds 3.
+    callMenus: {},
+    // Write captured as 0x0401 01 01 01 02 03: one slot, acknowledged and read back.
+    gestureWrite: "slot",
+    gestureFunctions: [0, 1, 3, 5, 6, 7, 8, 10],
+  },
+  {
+    // Handshake, identity, firmware, offered events and subscription, battery, noise, EQ, switches and
+    // gestures. 0x0109 (wear) was never queried; wear arrives by push. 0x0405, 0x0400 etc. were not exercised.
+    commands: [
+      0x0100, 0x0103, 0x0105, 0x0106, 0x0108, 0x010c, 0x010d, 0x010f, 0x0200, 0x0205, 0x0401,
+      0x0403, 0x0404, 0x0406, 0x8500,
+    ],
+    // 1 noise (captured). 4 Smart level: only seen as a push (0204 03 04 01), never queried; read-only.
+    noiseReads: [1, 4],
+    featureReadIds: [6, 4, 17],
+    eqMaxId: 3,
+  },
+);
+
+/** Before the model is known, and for models with no profile: identity and diagnostics reads only. */
+export const PROBE_PROFILE: ModelProfile = makeProfile(
+  {
+    productId: "",
+    displayName: "Unsupported model",
+    experimental: true,
+    testedFirmware: [],
+    noiseModes: [],
+    holdModes: [],
+    switchesReadable: [],
+    switchesWritable: [],
+    featureQuery: [6, 4, 17],
+    eqPresets: [],
+    customEq: false,
+    gestureMenus: {},
+    callMenus: {},
+    gestureWrite: "slot",
+    gestureFunctions: [],
+  },
+  {
+    commands: [0x0100, 0x0103, 0x0105, 0x0200, 0x010d, 0x8500],
+    noiseReads: [],
+    featureReadIds: [6, 4, 17],
+    eqMaxId: 0,
+  },
+);
+// Keyed by lowercase product id.
+export const PROFILES: ReadonlyMap<string, ModelProfile> = new Map(
+  [BUDS4, BUDS3].map((p) => [p.productId, p]),
+);
+export const profileFor = (productId: string) => PROFILES.get(productId.toLowerCase());
+
 export const hex = (command: number) => command.toString(16).padStart(4, "0");
-export function encode(command: number, sequence: number, payload: Bytes = []): Uint8Array {
-  const valid = COMMANDS.get(command);
+export function encode(
+  profile: ModelProfile,
+  command: number,
+  sequence: number,
+  payload: Bytes = [],
+): Uint8Array {
+  const valid = profile.commands.get(command);
   if (!valid) throw Error("Command outside allowed scope");
-  if (!Number.isInteger(sequence) || sequence < 1 || sequence > 254)
-    throw Error("Invalid sequence");
+  // Answers to the buds' own requests echo whatever sequence they used.
+  const sequenceOk =
+    command === 0x8500
+      ? Number.isInteger(sequence) && sequence >= 0 && sequence <= 255
+      : Number.isInteger(sequence) && sequence >= 1 && sequence <= 254;
+  if (!sequenceOk) throw Error("Invalid sequence");
   if (payload.length > 512 || !payload.every(isByte)) throw Error("Invalid payload");
   if (!valid(payload)) throw Error(`Invalid payload for ${hex(command)}`);
   let size = 7 + payload.length;
@@ -403,6 +610,7 @@ const ALWAYS = [
 ];
 export interface Capabilities {
   bitmap: Bytes;
+  /** Offered by the earbuds' 0x8100 bitmap. A profile narrows this further; see BudsSession.supports. */
   supports(command: number): boolean;
 }
 export function capabilities(p: Bytes): Capabilities {
@@ -526,15 +734,6 @@ export const FUNCTIONS: Record<number, string> = {
   28: "Decline call",
   29: "Answer or end call",
 };
-// Buds 4 gesture and call menus, mapped to measured function bytes. Call menus: QuickBuds captures (QuickBuds docs/PROTOCOL.md:1009). Gesture lists: no independent source; QuickBuds' Buds 4 menu entry (line 1013) is a comparison with the vendor app, not a capture. TODO: re-verify each list with a capture.
-export const GESTURE_MENUS: Record<number, number[]> = {
-  1: [0, 1],
-  2: [0, 1, 5, 6, 3, 17],
-  3: [0, 5, 6, 3, 17],
-  5: [0, 7, 10],
-  4: [0, 8],
-};
-export const CALL_MENUS: Record<number, number[]> = { 2: [0, 29], 6: [0, 28] };
 export type Ear = "Left" | "Right";
 export interface Gesture {
   device: number;
@@ -558,12 +757,14 @@ export function gestures(p: Bytes): Gesture[] {
 // Writes every slot the table has for (side, action) outside the call group; the table's shape
 // varies between reads, so slots are never hardcoded.
 export function gestureTablePayload(
+  profile: ModelProfile,
   table: Gesture[],
   side: Ear,
   action: number,
   fn: number,
 ): Bytes {
-  if (!GESTURE_MENUS[action]?.includes(fn)) throw Error("Function not offered for this gesture");
+  if (!profile.gestureMenus[action]?.includes(fn))
+    throw Error("Function not offered for this gesture");
   const device = side === "Left" ? 1 : 2;
   let matched = 0;
   const entries = table.map((e) => {
@@ -574,10 +775,16 @@ export function gestureTablePayload(
     return [e.device, e.button, e.action, e.fn];
   });
   if (!matched) throw Error("This gesture is not in the earbuds’ current table");
+  if (profile.gestureWrite === "slot") {
+    // Only the changed slots, the form captured on Buds 3 (01 01 01 02 03).
+    const changed = entries.filter((e) => e[0] === device && e[2] === action && e[1] !== 6);
+    return [changed.length, ...changed.flat()];
+  }
   return [entries.length, ...entries.flat()];
 }
-export function callGesturePayload(action: number, fn: number): Bytes {
-  if (!CALL_MENUS[action]?.includes(fn)) throw Error("Function not offered for this call control");
+export function callGesturePayload(profile: ModelProfile, action: number, fn: number): Bytes {
+  if (!profile.callMenus[action]?.includes(fn))
+    throw Error("Function not offered for this call control");
   return [1, 4, 6, action, fn];
 }
 
@@ -748,4 +955,36 @@ export function goldenRecord(p: Bytes): GoldenRecord | null {
     uid: ((p[39] << 24) | (p[40] << 16) | (p[41] << 8) | p[42]) >>> 0,
     name: new TextDecoder().decode(Uint8Array.from(p.slice(43))),
   };
+}
+
+// The buds ask for the time with 0x0500; the answer is 0x8500 00 <unix seconds u32 LE>, echoing their sequence
+// (QuickBuds docs/PROTOCOL.md:483 [CAPTURE]). Buds 3 sent no 0x0500 in the owner capture.
+export const timePayload = (unixSeconds: number): Bytes => [
+  0,
+  unixSeconds & 255,
+  (unixSeconds >>> 8) & 255,
+  (unixSeconds >>> 16) & 255,
+  (unixSeconds >>> 24) & 255,
+];
+
+// Read-only report for a model with no profile. It holds protocol replies only: no names, addresses or
+// serial numbers (the earbuds' own replies carry none).
+export interface UnsupportedInfo {
+  productId: string;
+  firmware?: string;
+  bitmap: Bytes;
+  offeredEvents?: Bytes;
+  features?: Bytes;
+}
+const hexBytes = (b?: Bytes) =>
+  b ? b.map((x) => x.toString(16).padStart(2, "0")).join(" ") : "n/a";
+export function diagnosticsReport(info: UnsupportedInfo) {
+  return [
+    "OpenBuds diagnostics (no personal data)",
+    `Product id: ${info.productId}`,
+    `Firmware: ${info.firmware ?? "n/a"}`,
+    `0x8100 bitmap: ${hexBytes(info.bitmap)}`,
+    `0x8200 offered events: ${hexBytes(info.offeredEvents)}`,
+    `0x810D reply (ids 6, 4, 17): ${hexBytes(info.features)}`,
+  ].join("\n");
 }

@@ -55,6 +55,7 @@ export function Tools() {
     );
   }
 
+  if (![0x0400, 0x0405, 0x040d].some((c) => session.supports(c))) return null;
   return (
     <Group title="Tools">
       {session.supports(0x0400) && (

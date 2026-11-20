@@ -90,6 +90,8 @@ struct HomePage: View {
     VStack(alignment: .leading, spacing: 8) {
       header.padding(.leading, 6).padding(.top, 2)
       switch session.connection {
+      case .connected where session.unsupported != nil:
+        UnsupportedCard(info: session.unsupported!)
       case .connected:
         PanelSection { BatteryRow(session: session).padding(.vertical, 10) }
         PanelSection { NoiseControl(session: session).padding(.vertical, 9) }
@@ -101,7 +103,9 @@ struct HomePage: View {
           }
           GridRow {
             NavTile(icon: "switch.2", color: .green, title: "Features", value: featureSummary) { model.open(.features) }
-            NavTile(icon: "wrench.and.screwdriver.fill", color: .orange, title: "Tools", value: "Find and fit") { model.open(.tools) }
+            if [0x0400, 0x0405, 0x040D].contains(where: { session.supports($0) }) {
+              NavTile(icon: "wrench.and.screwdriver.fill", color: .orange, title: "Tools", value: "Find and fit") { model.open(.tools) }
+            }
           }
         }
         AboutRow { model.open(.about) }
@@ -142,7 +146,18 @@ struct HomePage: View {
   private var header: some View {
     HStack(spacing: 8) {
       VStack(alignment: .leading, spacing: 1) {
-        Text(session.isConnected ? "OnePlus Buds 4" : "OpenBuds").font(.headline)
+        HStack(spacing: 6) {
+          Text(session.isConnected ? (session.profile.isKnown ? session.profile.displayName : "Unsupported earbuds") : "OpenBuds")
+            .font(.headline)
+          if session.isConnected, session.profile.experimental, session.profile.isKnown {
+            Text("Experimental")
+              .font(.caption2.weight(.medium))
+              .padding(.horizontal, 6)
+              .padding(.vertical, 2)
+              .background(.orange.opacity(0.2), in: .capsule)
+              .foregroundStyle(.orange)
+          }
+        }
         if let subtitle { Text(subtitle).font(.caption).foregroundStyle(.secondary) }
       }
       Spacer()
@@ -517,11 +532,38 @@ struct BatteryGauge: View {
   }
 }
 
+/// A product id with no profile: nothing is sent but identity reads, and the owner can copy what the earbuds said.
+struct UnsupportedCard: View {
+  let info: UnsupportedInfo
+  @State private var copied = false
+
+  var body: some View {
+    ConnectionCard(
+      title: "Unsupported model \(info.productId)",
+      message: "Firmware \(info.firmware ?? "unknown"). OpenBuds doesn’t know these earbuds yet, so it only reads them. Copy the diagnostics and attach them to a GitHub issue; they contain no personal data.",
+      busy: false
+    ) {
+      Button(copied ? "Copied" : "Copy diagnostics") {
+        NSPasteboard.general.clearContents()
+        copied = NSPasteboard.general.setString(info.report, forType: .string)
+      }
+      .buttonStyle(.glassProminent)
+    }
+  }
+}
+
 struct NoiseControl: View {
   let session: BudsSession
 
   private enum Group: CaseIterable {
     case anc, adaptive, transparency, off
+    /// Offered when the model's profile offers any mode in the group.
+    func offered(by modes: [NoiseMode]) -> Bool {
+      switch self {
+      case .anc: modes.contains { $0.isANC }
+      default: modes.contains(mode)
+      }
+    }
     var mode: NoiseMode {
       switch self {
       case .anc: .anc
@@ -558,7 +600,7 @@ struct NoiseControl: View {
     VStack(alignment: .leading, spacing: 10) {
       Text("Noise Control").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
       HStack(alignment: .top, spacing: 4) {
-        ForEach(Group.allCases, id: \.self) { group in
+        ForEach(Group.allCases.filter { $0.offered(by: session.profile.noiseModes) }, id: \.self) { group in
           let selected = current == group
           Button {
             guard !selected else { return }
@@ -589,7 +631,7 @@ struct NoiseControl: View {
             get: { session.noise?.mode ?? .smart },
             set: { mode in if mode != session.noise?.mode { Task { await session.setNoise(mode) } } }
           ),
-          options: NoiseMode.ancLevels,
+          options: NoiseMode.ancLevels.filter { session.profile.noiseModes.contains($0) },
           compact: true
         ) { $0.rawValue.capitalized }
         .disabled(session.busy)

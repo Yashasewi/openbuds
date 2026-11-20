@@ -11,11 +11,6 @@ import {
 import { confirm, run, session, useAction, useBuds } from "../lib/store";
 import { Button, Dialog, Group, Range, Row, Switch, cx } from "./ui";
 
-const BUILT_IN: { id: number; name: string; note: string }[] = [
-  { id: 0, name: "Balanced", note: "Even across the range" },
-  { id: 1, name: "Serenade", note: "Brighter voices" },
-  { id: 2, name: "Bass", note: "Fuller low end" },
-];
 const signedText = (v: number) => (v > 0 ? `+${v}` : String(v));
 
 export function Sound() {
@@ -34,17 +29,19 @@ export function Sound() {
         stack
         title="Equalizer"
         description={
-          custom.length
-            ? "Select a preset. Custom presets can be edited."
-            : "Select a preset, or make your own."
+          !state.profile?.customEq
+            ? "Select a preset."
+            : custom.length
+              ? "Select a preset. Custom presets can be edited."
+              : "Select a preset, or make your own."
         }
         status={presets.status}
         control={
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {BUILT_IN.map((p) => (
+            {(state.profile?.eqPresets ?? []).map((p) => (
               <PresetTile
                 key={p.id}
-                name={p.name}
+                name={p.label}
                 note={p.note}
                 selected={state.eq === p.id}
                 disabled={presets.busy}
@@ -402,6 +399,8 @@ export function SwitchRow({
   const { busy, status } = useAction(key);
   const value = state.features?.[id];
   const f = state.features ?? {};
+  // Readable but not writable for this model (e.g. dual connection on Buds 3): shown, never sent.
+  const readOnly = !state.profile?.switchesWritable.includes(id);
 
   async function change(on: boolean) {
     if (id === SWITCHES.hiRes) {
@@ -458,13 +457,15 @@ export function SwitchRow({
   return (
     <Row
       title={title}
-      description={unavailable ?? description}
+      description={
+        unavailable ?? (readOnly ? `${description} Change it from your phone.` : description)
+      }
       status={status}
       control={
         <Switch
           label={title}
           on={value === undefined ? undefined : value === 1}
-          disabled={busy || !!unavailable}
+          disabled={busy || readOnly || !!unavailable}
           onChange={change}
         />
       }

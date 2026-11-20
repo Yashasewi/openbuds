@@ -134,7 +134,16 @@ export function About() {
           }
         />
       )}
-      <Info label="Model" value={state.model ? "OnePlus Buds 4" : undefined} />
+      <Info
+        label="Model"
+        value={
+          state.profile
+            ? `${state.profile.displayName}${state.profile.experimental ? " (experimental)" : ""}`
+            : state.model
+              ? `Unsupported (${state.model})`
+              : undefined
+        }
+      />
       <Info label="Firmware" value={state.firmware} error={state.errors.firmware} />
       <Info
         label="Audio codec"
