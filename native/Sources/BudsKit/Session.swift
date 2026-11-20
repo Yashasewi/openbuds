@@ -129,8 +129,10 @@ public final class BudsSession {
       caps = try decodeCapabilities(try await query(0x0100))
       let model = try decodeModel(try await query(0x0103))
       guard let known = ModelProfile.profile(for: model) else {
-        // No profile, no writes: read the identity and show a report the owner can send us.
-        await diagnose(model: model, bitmap: caps?.bitmap ?? [])
+        // No profile, no setting changes: read the identity and show a report the owner can send us.
+        // A disconnect during the reads goes to the catch below instead of showing Connected.
+        try await diagnose(model: model, bitmap: caps?.bitmap ?? [])
+        guard device != nil else { throw BudsError.disconnected }
         connection = .connected(name)
         return
       }
@@ -148,14 +150,19 @@ public final class BudsSession {
     }
   }
 
-  /// Replies from the identity allow-list only; a failed read just leaves a gap.
-  private func diagnose(model: String, bitmap: Bytes) async {
+  /// Replies from the identity allow-list only; a failed read just leaves a gap, but a
+  /// disconnect is passed up so the session doesn't claim to be connected.
+  private func diagnose(model: String, bitmap: Bytes) async throws {
     var info = UnsupportedInfo(productId: model, bitmap: bitmap)
-    if let p = try? await query(0x0105) { info.firmware = try? decodeFirmware(p) }
-    if let p = try? await query(0x0200), p.count > 2 { info.offeredEvents = Array(p[2...]) }
-    info.features = try? await query(0x010D, profile.featurePayload)
+    if let p = try await optionalRead(0x0105) { info.firmware = try? decodeFirmware(p) }
+    if let p = try await optionalRead(0x0200), p.count > 2 { info.offeredEvents = Array(p[2...]) }
+    info.features = try await optionalRead(0x010D, profile.featurePayload)
     firmware = info.firmware
     unsupported = info
+  }
+
+  private func optionalRead(_ command: UInt16, _ payload: Bytes = []) async throws -> Bytes? {
+    do { return try await query(command, payload) } catch BudsError.disconnected { throw BudsError.disconnected } catch { return nil }
   }
 
   private func scheduleRetry() {

@@ -170,13 +170,13 @@ export function NowPanel() {
 }
 
 function Unsupported({ info }: { info: NonNullable<DeviceState["unsupported"]> }) {
-  const [copied, setCopied] = useState(false);
+  const [copyState, setCopy] = useState<"idle" | "copied" | "failed">("idle");
   async function copy() {
     try {
       await navigator.clipboard.writeText(info.report);
-      setCopied(true);
+      setCopy("copied");
     } catch {
-      setCopied(false);
+      setCopy("failed");
     }
   }
   return (
@@ -185,10 +185,26 @@ function Unsupported({ info }: { info: NonNullable<DeviceState["unsupported"]> }
         Unsupported model {info.productId}, firmware {info.firmware ?? "unknown"}
       </p>
       <p className="text-ink/70">
-        OpenBuds doesn’t know these earbuds yet, so it sends them nothing but identity reads. Copy
-        the diagnostics and attach them to a GitHub issue; they contain no personal data.
+        OpenBuds doesn’t know these earbuds yet, so it only reads their identity and never changes a
+        setting. Copy the diagnostics and attach them to a GitHub issue; they contain no personal
+        data.
       </p>
-      <Button onClick={copy}>{copied ? "Copied" : "Copy diagnostics"}</Button>
+      <Button onClick={copy}>{copyState === "copied" ? "Copied" : "Copy diagnostics"}</Button>
+      {copyState === "failed" && (
+        <>
+          <p className="text-warn" role="alert">
+            Couldn’t copy to the clipboard. Select the text below and copy it yourself.
+          </p>
+          <textarea
+            readOnly
+            value={info.report}
+            rows={8}
+            aria-label="Diagnostics report"
+            className="w-full rounded-xl bg-white/60 p-2 font-mono text-[0.8rem] text-ink"
+            onFocus={(event) => event.currentTarget.select()}
+          />
+        </>
+      )}
     </div>
   );
 }

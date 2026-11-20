@@ -294,9 +294,11 @@ export class BudsSession {
         .padStart(6, "0");
       const profile = profileFor(model);
       if (!profile) {
-        // No profile, no writes: read the identity and show a report the owner can send us.
+        // No profile, no setting changes: read the identity and show a report the owner can send us.
         this.setState({ model });
         await this.diagnose(model);
+        // A disconnect during the reads already closed the session; don't mark it connected again.
+        if (!this.connected || this.generation !== generation) return;
         this.publish({ connection: "connected" });
         return;
       }
@@ -397,10 +399,13 @@ export class BudsSession {
     );
   }
   // One writer at a time: a request and our answer to a request from the buds must not interleave.
+  // A write queued before a disconnect or reconnect must not reach the next session's port.
   private writeBytes(bytes: Uint8Array) {
+    const generation = this.generation;
     const write = this.writeChain
       .catch(() => {})
       .then(async () => {
+        if (!this.connected || generation !== this.generation) throw Error("Session changed");
         const writer = this.port!.writable.getWriter();
         try {
           await writer.write(bytes);

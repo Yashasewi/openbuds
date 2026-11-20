@@ -75,7 +75,7 @@ The handshake reply `0x8100` carries a bitmap of supported commands. The table t
 
 - Product id bytes `00 14 54 06` map to model `065414` (QuickBuds `docs/PROTOCOL.md` section 21.1, `[CAPTURE]`).
 - Product id bytes `00 14 3C 06` map to model `063C14`, OnePlus Buds 3 (owner capture, OnePlus Buds 3 fw 127.127.101, 2026-10-12).
-- Any other id has no profile. OpenBuds then sends nothing but identity reads (`0x0100`, `0x0103`, `0x0105`, `0x0200`, and `0x010D` for switch ids 6, 4 and 17) and shows a read-only "Unsupported model" state with a **Copy diagnostics** button. The report holds the product id, firmware, the `0x8100` bitmap, the `0x8200` offered events and the `0x010D` reply, and nothing else.
+- Any other id has no profile. OpenBuds then sends nothing but identity reads (`0x0100`, `0x0103`, `0x0105`, `0x0200`, and `0x010D` for switch ids 6, 4 and 17), plus its answer if the earbuds send a `0x0500` time request, and shows a read-only "Unsupported model" state with a **Copy diagnostics** button. The report holds the product id, firmware, the `0x8100` bitmap, the `0x8200` offered events and the `0x010D` reply, and nothing else.
 
 ## Requests from the buds
 
