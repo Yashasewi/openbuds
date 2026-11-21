@@ -12,3 +12,4 @@ __pycache__/
 .claude/
 *.dSYM/
 *.iconset/
+video/
