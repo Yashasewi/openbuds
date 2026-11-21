@@ -57,8 +57,10 @@ export function Connections() {
           <span
             aria-hidden
             className={cx(
-              "grid size-9 shrink-0 place-items-center rounded-xl",
-              device.connected ? "bg-mint/45 text-tip" : "bg-ink/[0.06] text-ink/45",
+              "grid size-9 shrink-0 place-items-center border",
+              device.connected
+                ? "border-tip/50 bg-tip/12 text-tip"
+                : "border-ink/20 bg-fog/60 text-ink/45",
             )}
           >
             <svg viewBox="0 0 20 20" className="size-4.5">
@@ -67,22 +69,21 @@ export function Connections() {
                 y="4"
                 width="14"
                 height="9.5"
-                rx="1.6"
                 fill="none"
                 stroke="currentColor"
-                strokeWidth="1.5"
+                strokeWidth="1.4"
               />
-              <path d="M7 16.5h6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              <path d="M7 16.5h6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="square" />
             </svg>
           </span>
           <div className="min-w-0">
-            <div className="truncate text-[1rem]">
+            <div className="truncate text-[0.95rem]">
               {device.name || "Unnamed device"}
               {device.thisDevice && (
-                <span className="ml-2 text-[0.85rem] text-ink/50">this Mac</span>
+                <span className="ml-2 font-mono text-[0.78rem] text-ink/48">this Mac</span>
               )}
             </div>
-            <div className="text-[0.85rem] text-ink/55">
+            <div className="text-[0.83rem] font-light text-ink/55">
               {device.connected
                 ? device.playing
                   ? "Connected, playing audio"
@@ -103,16 +104,18 @@ export function About() {
   return (
     <Group title="About">
       <a href={REPO} className="group flex items-center gap-3.5 py-3.5">
-        <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-ink text-sheet">
+        <span className="grid size-9 shrink-0 place-items-center border border-ink/30 bg-ink text-fog">
           <GitHubMark className="size-4.5" />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-[1rem] group-hover:text-tip">Source on GitHub</span>
-          <span className="block truncate text-[0.88rem] text-ink/50">
+          <span className="block text-[0.95rem] transition-colors group-hover:text-tip">
+            Source on GitHub
+          </span>
+          <span className="block truncate text-[0.84rem] font-light text-ink/52">
             OpenBuds is open source under GPL-3.0-or-later
           </span>
         </span>
-        <span aria-hidden className="text-ink/35 group-hover:text-tip">
+        <span aria-hidden className="font-mono text-sm text-ink/40 group-hover:text-tip">
           ↗
         </span>
       </a>
@@ -163,8 +166,13 @@ export function About() {
 function Info({ label, value, error }: { label: string; value?: string; error?: string }) {
   return (
     <div className="flex items-center justify-between gap-4 py-3.5">
-      <span className="text-[1rem]">{label}</span>
-      <span className={cx("text-[0.95rem] tabular-nums", value ? "text-ink/70" : "text-ink/40")}>
+      <span className="text-[0.94rem] font-light">{label}</span>
+      <span
+        className={cx(
+          "font-mono text-[0.86rem] tabular-nums",
+          value ? "text-ink/80" : "text-ink/40",
+        )}
+      >
         {value ?? (error ? "Not reported" : "–")}
       </span>
     </div>

@@ -1,20 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import { HEARING_LOUD, HEARING_START, HEARING_STOPS, type FitResult } from "../lib/protocol";
-import { confirm, run, session, useAction, useBuds } from "../lib/store";
+import { confirm, run, session, useAction, useBuds, useRinging } from "../lib/store";
 import { Button, Dialog, Group, Row } from "./ui";
 
 const FREQUENCIES = ["250 Hz", "500 Hz", "1 kHz", "2 kHz", "4 kHz", "8 kHz"];
 
 export function Tools() {
   const { state, connection } = useBuds();
+  const ringing = useRinging();
   const find = useAction("find"),
     fit = useAction("fit"),
     golden = useAction("hearing");
-  const [ringing, setRinging] = useState(false);
   const [hearingOpen, setHearingOpen] = useState(false);
+
   useEffect(() => {
     if (connection !== "connected") {
-      setRinging(false);
       setHearingOpen(false);
     }
   }, [connection]);
@@ -34,7 +34,6 @@ export function Tools() {
       "find",
       async () => {
         await session.findEarbuds(on);
-        setRinging(on);
       },
       on ? "Ringing. Stop when you find them." : "Stopped ringing",
     );
@@ -199,27 +198,28 @@ function HearingTest({ open, onClose }: { open: boolean; onClose: () => void }) 
     <Dialog open={open} onClose={close} title="Hearing test">
       {step < 0 ? (
         <>
-          <p className="mt-3 text-[0.95rem] text-ink/70">
+          <p className="mt-3 text-[0.9rem] font-light leading-relaxed text-ink/70">
             Sit somewhere quiet and wear both earbuds. For each tone, move the slider until you can
             only just hear it.
           </p>
-          <p className="mt-2 text-[0.88rem] text-ink/55">
+          <p className="mt-2 text-[0.84rem] font-light text-ink/52">
             Your earbuds keep one profile. Finishing replaces the current one.
           </p>
         </>
       ) : (
         <>
           <div className="mt-4 flex items-baseline justify-between">
-            <p className="text-[1rem]">
-              {step < 6 ? "Left ear" : "Right ear"}, {FREQUENCIES[step % 6]}
+            <p className="text-[0.95rem]">
+              {step < 6 ? "Left ear" : "Right ear"},{" "}
+              <span className="font-mono text-tip">{FREQUENCIES[step % 6]}</span>
             </p>
-            <p className="numeral text-[0.9rem] text-ink/55 tabular-nums">{step + 1} of 12</p>
+            <p className="font-mono text-[0.82rem] text-ink/55 tabular-nums">{step + 1} / 12</p>
           </div>
           <div className="mt-3 flex gap-1" aria-hidden>
             {Array.from({ length: 12 }, (_, i) => (
               <span
                 key={i}
-                className={`h-1 flex-1 rounded-full ${i < step ? "bg-tip" : i === step ? "bg-mint" : "bg-ink/10"} ${i === 6 ? "ml-2" : ""}`}
+                className={`h-[2px] flex-1 ${i < step ? "bg-tip" : i === step ? "bg-ink" : "bg-ink/15"} ${i === 6 ? "ml-2" : ""}`}
               />
             ))}
           </div>
@@ -251,14 +251,14 @@ function HearingTest({ open, onClose }: { open: boolean; onClose: () => void }) 
                 timer.current = setTimeout(() => void play(step, v), 300);
               }}
             />
-            <div className="mt-1.5 flex justify-between text-[0.8rem] text-ink/50">
+            <div className="mt-1.5 flex justify-between font-mono text-[0.75rem] text-ink/50">
               <span>Quieter</span>
               <span>Louder</span>
             </div>
           </div>
         </>
       )}
-      <p aria-live="polite" className="mt-4 min-h-[1.3em] text-[0.88rem] text-warn">
+      <p aria-live="polite" className="mt-4 min-h-[1.3em] text-[0.84rem] text-warn">
         {note}
       </p>
       <div className="mt-4 flex justify-between gap-2">
