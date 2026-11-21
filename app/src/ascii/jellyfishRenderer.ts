@@ -382,15 +382,17 @@ export class JellyfishRenderer {
     for (const j of world.jellies) {
       const bio = BIOMECH[j.species];
       if (j.cDot > 0.12) {
-        const cosT = Math.cos(j.tilt);
-        const sinT = Math.sin(j.tilt);
+        const fwdX = Math.cos(j.heading);
+        const fwdY = Math.sin(j.heading);
+        const rightX = -fwdY;
+        const rightY = fwdX;
         const rMargin = j.bellDiameter * 0.5 * (1 - bio.deltaR * j.contraction) * bio.vortexOffset;
         const drop = j.bellDiameter * 0.22;
-        const bx = j.x - sinT * drop;
-        const by = j.y + cosT * drop;
+        const bx = j.x - fwdX * drop;
+        const by = j.y - fwdY * drop;
         const amt = clamp(j.cDot * 0.085 * j.depth, 0.045, 0.26);
-        this.stamp(wake, bx - cosT * rMargin, by - sinT * rMargin, 2, amt);
-        this.stamp(wake, bx + cosT * rMargin, by + sinT * rMargin, 2, amt);
+        this.stamp(wake, bx - rightX * rMargin, by - rightY * rMargin, 2, amt);
+        this.stamp(wake, bx + rightX * rMargin, by + rightY * rMargin, 2, amt);
       }
       for (let a = 0; a < bio.oralCount; a++) {
         const nodes = j.oralArms[a];
@@ -428,8 +430,10 @@ export class JellyfishRenderer {
   private sampleJelly(px: number, py: number, j: Jellyfish, look: SpeciesLook): boolean {
     const bio = BIOMECH[j.species];
     const B = j.bellDiameter;
-    const cosT = Math.cos(-j.tilt);
-    const sinT = Math.sin(-j.tilt);
+    // Rotate screen point into bell-local frame where -lv is forward along j.heading
+    const rot = j.heading + Math.PI * 0.5;
+    const cosT = Math.cos(-rot);
+    const sinT = Math.sin(-rot);
     const dx = px - j.x;
     const dy = py - j.y;
     const lu = dx * cosT - dy * sinT;
@@ -674,10 +678,11 @@ export class JellyfishRenderer {
       const spIdx = SPECIES_KEYS.indexOf(j.species);
       const B = j.bellDiameter;
 
-      let minX = j.x - B * 0.65;
-      let maxX = j.x + B * 0.65;
-      let minY = j.y - B * (bio.bellAspect + 0.18);
-      let maxY = j.y + B * 0.42;
+      const bellReach = B * Math.max(0.75, bio.bellAspect + 0.25);
+      let minX = j.x - bellReach;
+      let maxX = j.x + bellReach;
+      let minY = j.y - bellReach;
+      let maxY = j.y + bellReach;
       for (let a = 0; a < bio.oralCount; a++) {
         const nodes = j.oralArms[a];
         for (let k = 0; k < ORAL_NODES; k++) {
