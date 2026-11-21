@@ -103,6 +103,22 @@ const LOOKS: Record<JellySpecies, SpeciesLook> = {
     },
     scallop: (th) => 0.072 * (1 - Math.abs((((th * 8) / Math.PI) % 2) - 1)),
   },
+  // Alarm Crown Jelly (Atolla wyvillei): stepped abyssal ruby crown + circulating cyan pinwheel wave
+  atolla: {
+    baseRgb: [224, 88, 102],
+    accentRgb: [42, 228, 255],
+    oralRgb: [196, 76, 92],
+    tentRgb: [152, 222, 252],
+    halfWidth: (s) => {
+      const base =
+        s < 0.52
+          ? 0.66 * Math.pow(Math.sin((s / 0.52) * Math.PI * 0.5), 0.68)
+          : 0.66 + 0.34 * smoothstep(0.52, 0.92, s);
+      const groove = 0.065 * Math.exp(-Math.pow((s - 0.52) / 0.05, 2));
+      return Math.max(0, base - groove);
+    },
+    scallop: (th) => 0.095 * Math.pow(Math.sin(11 * th), 2),
+  },
   // Crystal Jelly: ultra-flat ice glass lens + hairline radial canals + emerald GFP margin beads
   crystal: {
     baseRgb: [154, 226, 248],
@@ -115,7 +131,7 @@ const LOOKS: Record<JellySpecies, SpeciesLook> = {
   },
 };
 
-const SPECIES_KEYS: JellySpecies[] = ["nettle", "moon", "helmet", "crystal"];
+const SPECIES_KEYS: JellySpecies[] = ["nettle", "moon", "helmet", "atolla", "crystal"];
 
 /** Crisp device-pixel-snapped dark cell grid on pure #000000. Exported for SoundField. */
 export function paintGrid(
@@ -507,6 +523,10 @@ export class JellyfishRenderer {
           } else if (j.species === "helmet" && frontMarginBand > 0.4) {
             // Helmet Jelly: cold electric-blue flash down the 16 marginal lappets
             bioGlow = clamp(Math.exp(-j.bioPulseAge * 1.4) * 0.85 + 0.28, 0, 1);
+          } else if (j.species === "atolla" && frontMarginBand > 0.36) {
+            // Alarm Crown Jelly: rotating cyan burglar-alarm pinwheel along the 22 crown lappets
+            const pinwheel = (((theta / TAU) - j.phi * 2.2) % 1 + 1) % 1;
+            bioGlow = clamp(Math.pow(Math.max(0, 1 - pinwheel * 2.6), 1.9) * 0.95 + 0.16, 0, 1);
           }
         } else if (j.species === "moon") {
           // Moon Jelly: unmistakable 4-lobe horseshoe clover gonads inside the glassy dome!
@@ -572,6 +592,25 @@ export class JellyfishRenderer {
             flag = FLAG_CANAL;
             shade = 0.64;
             bioGlow = clamp(Math.exp(-j.bioPulseAge * 1.4) * 0.75 + 0.25, 0, 1);
+            slopeCode = 1;
+          }
+        } else if (j.species === "atolla") {
+          // Alarm Crown Jelly: dark ruby central button + rotating cyan "burglar alarm" pinwheel wave!
+          const pinwheel = (((theta / TAU) - j.phi * 2.2) % 1 + 1) % 1;
+          const alarmWave = Math.pow(Math.max(0, 1 - pinwheel * 2.8), 2.0);
+          const furrowDist = Math.abs(sClamped - 0.52);
+          if (furrowDist < 0.075) {
+            flag = FLAG_RIM;
+            shade = 0.74 + alarmWave * 0.26;
+            bioGlow = clamp(0.25 + alarmWave * 0.85, 0, 1);
+          } else if (sClamped > 0.14 && sClamped < 0.48 && across < 0.62) {
+            flag = FLAG_STOMACH;
+            shade = 0.4 + (1 - across) * 0.34;
+            bioGlow = 0;
+          } else if (sClamped > 0.55 && sClamped < 0.96 && Math.abs(Math.sin(theta * 11)) > 0.8) {
+            flag = FLAG_CANAL;
+            shade = 0.56 + alarmWave * 0.36;
+            bioGlow = clamp(alarmWave * 0.9, 0, 1);
             slopeCode = 1;
           }
         }

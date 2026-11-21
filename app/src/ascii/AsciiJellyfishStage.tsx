@@ -68,7 +68,8 @@ class JellyfishEngine {
     this.world.resize(rect.width, rect.height, this.renderer.cellWidth, this.renderer.cellHeight);
     if (!this.warmed) {
       this.warmed = true;
-      for (let i = 0; i < 160; i++) {
+      const warmSteps = 55 + Math.floor(Math.random() * 85);
+      for (let i = 0; i < warmSteps; i++) {
         this.world.step(STEP);
         this.renderer.warmStep(this.world, STEP);
       }

@@ -19,7 +19,7 @@ import { TAU, angleDiff, clamp, current, rand, randInt } from "./math";
 export const ORAL_NODES = 13;
 export const TENTACLE_NODES = 16;
 
-export type JellySpecies = "nettle" | "moon" | "helmet" | "crystal";
+export type JellySpecies = "nettle" | "moon" | "helmet" | "atolla" | "crystal";
 
 export interface JellySpec {
   species: JellySpecies;
@@ -28,11 +28,12 @@ export interface JellySpec {
 }
 
 export const DEFAULT_JELLIES: JellySpec[] = [
-  { species: "nettle", size: 1.0, depth: 1.0 },
-  { species: "moon", size: 0.86, depth: 0.86 },
-  { species: "helmet", size: 0.76, depth: 0.74 },
-  { species: "crystal", size: 0.72, depth: 0.62 },
-  { species: "moon", size: 0.48, depth: 0.46 },
+  { species: "nettle", size: 0.96, depth: 1.0 },
+  { species: "moon", size: 0.86, depth: 0.88 },
+  { species: "helmet", size: 0.76, depth: 0.76 },
+  { species: "atolla", size: 0.72, depth: 0.68 },
+  { species: "crystal", size: 0.68, depth: 0.58 },
+  { species: "moon", size: 0.48, depth: 0.44 },
 ];
 
 export interface SpeciesBiomechanics {
@@ -120,6 +121,28 @@ export const BIOMECH: Record<JellySpecies, SpeciesBiomechanics> = {
     tentacleLenMul: 1.28,
     tentacleFlare: 0.54,
     vortexOffset: 0.58,
+  },
+  // Alarm Crown Jelly (Atolla wyvillei): stepped crown disc + rotating cyan pinwheel + 1 long whip
+  atolla: {
+    tauC: 0.26,
+    tauR: 0.48,
+    freqHz: 0.58,
+    kJet: 0.72,
+    kRow: 0.68,
+    kPer: 0.28,
+    deltaR: 0.26,
+    phaseLagBell: 0.09,
+    phaseLagSkirt: 0.18,
+    meridionalPow: 1.5,
+    bellAspect: 0.46,
+    viewTilt: 0.38,
+    oralCount: 2,
+    oralLenMul: 0.34,
+    oralWidthMul: 0.09,
+    tentacleCount: 11,
+    tentacleLenMul: 0.62,
+    tentacleFlare: 0.34,
+    vortexOffset: 0.8,
   },
   crystal: {
     tauC: 0.31,
@@ -397,32 +420,67 @@ export class JellyfishWorld {
   seed() {
     const { width: W, height: H } = this;
     const minSide = Math.min(W, H);
-    const baseBell = clamp(minSide * 0.225, 130, 210);
+    const baseBell = clamp(minSide * 0.22, 126, 204);
+    const cxW = W * 0.5;
+    const cyW = H * 0.5;
 
-    // Initial natural open-water paths: each jellyfish starts in a distinct zone gliding along
-    // a different natural diagonal so frame 1 looks composed AND motion immediately flows across screen
-    const initialPaths: { x: number; y: number; heading: number; phi: number; passSide: 1 | -1 }[] = [
-      { x: 0.13, y: 0.42, heading: -1.18, phi: 0.16, passSide: -1 }, // Hero Sea Nettle pulsing up-right along left flank
-      { x: 0.86, y: 0.3, heading: 2.08, phi: 0.58, passSide: 1 }, // Moon Jelly gliding diagonally down-left on right
-      { x: 0.8, y: 0.74, heading: -1.85, phi: 0.35, passSide: 1 }, // Helmet Jelly rising smoothly from lower-right
-      { x: 0.22, y: 0.78, heading: -0.92, phi: 0.8, passSide: -1 }, // Crystal Jelly ascending from lower-left
-      { x: 0.42, y: 0.16, heading: -0.18, phi: 0.48, passSide: -1 }, // Distant Moonlet cruising across upper sky
-    ];
+    // Shuffle species order every load so every page refresh produces a completely fresh composition!
+    const shuffled = [...this.specs];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const k = randInt(0, i);
+      const tmp = shuffled[i];
+      shuffled[i] = shuffled[k];
+      shuffled[k] = tmp;
+    }
 
     this.jellies = [];
     this.vortices = [];
 
-    for (let i = 0; i < this.specs.length; i++) {
-      const { species, size, depth } = this.specs[i];
+    // Random angular offset around the perimeter + rejection sampling for guaranteed non-overlap
+    const baseTheta = rand(0, TAU);
+
+    for (let i = 0; i < shuffled.length; i++) {
+      const { species, size, depth } = shuffled[i];
       const bio = BIOMECH[species];
       const bellDiameter = baseBell * size;
       const radius = bellDiameter * (0.52 + bio.bellAspect * 0.12);
       const mass = size * size;
-      const init = initialPaths[i % initialPaths.length];
 
-      const x = W * (init.x + rand(-0.02, 0.02));
-      const y = H * (init.y + rand(-0.02, 0.02));
-      const heading = init.heading + rand(-0.14, 0.14);
+      // Pick a genuinely random open-water starting spot clear of the hero headline & other jellies
+      let x = W * 0.15;
+      let y = H * 0.3;
+      let bestScore = -Infinity;
+
+      for (let attempt = 0; attempt < 24; attempt++) {
+        // Spread candidates across the full viewport ring (with generous random radial & angular variation)
+        const sectorAngle = baseTheta + (i / shuffled.length) * TAU + rand(-0.42, 0.42);
+        const radFrac = rand(0.35, 0.48);
+        const candX = clamp(cxW + Math.cos(sectorAngle) * W * radFrac, radius * 0.65, W - radius * 0.65);
+        const candY = clamp(cyW + Math.sin(sectorAngle) * H * radFrac, 96 + radius * 0.25, H - radius * 0.65);
+
+        // Reject spots inside the center hero headline sanctuary
+        const ex = (candX - cxW) / (W * 0.275 + radius * 0.45);
+        const ey = (candY - cyW) / (H * 0.245 + radius * 0.35);
+        if (ex * ex + ey * ey < 1.0) continue;
+
+        let minGap = Infinity;
+        for (const other of this.jellies) {
+          const gap = Math.hypot(candX - other.x, candY - other.y) - (radius + other.radius);
+          if (gap < minGap) minGap = gap;
+        }
+        const score = minGap === Infinity ? 1000 : minGap;
+        if (score > bestScore) {
+          bestScore = score;
+          x = candX;
+          y = candY;
+        }
+        if (minGap > 60) break;
+      }
+
+      // Random natural swimming heading biased loosely across the viewport (so it sweeps through frame!)
+      const inwardAngle = Math.atan2(cyW - y, cxW - x);
+      const tangentDir = Math.random() < 0.5 ? 1 : -1;
+      const heading = inwardAngle + tangentDir * rand(0.55, 1.45);
 
       const oralArms: Float32Array[] = [];
       const oralLens = new Float32Array(bio.oralCount);
@@ -442,12 +500,15 @@ export class JellyfishWorld {
         const frac = bio.tentacleCount === 1 ? 0 : (tIdx / (bio.tentacleCount - 1)) * 2 - 1;
         tentacleRoots[tIdx] = frac * 0.46;
         tentaclePhases[tIdx] = rand(0, TAU);
-        const alt = tIdx % 2 === 0 ? 1.12 : 0.64;
+        // Atolla wyvillei signature: 1 unmistakable hypertrophied trailing whip tentacle!
+        const isAtollaWhip = species === "atolla" && tIdx === Math.floor(bio.tentacleCount / 2);
+        const alt = isAtollaWhip ? 3.4 : tIdx % 2 === 0 ? 1.12 : 0.64;
         tentacleLens[tIdx] =
           bellDiameter * bio.tentacleLenMul * alt * (1 - Math.abs(frac) * 0.14 + rand(-0.12, 0.14));
         tentacles.push(new Float32Array(TENTACLE_NODES * 2));
       }
 
+      const initPhi = rand(0, 1);
       const jelly: Jellyfish = {
         id: i + 1,
         species,
@@ -456,17 +517,17 @@ export class JellyfishWorld {
         mass,
         x,
         y,
-        vx: Math.cos(heading) * 32,
-        vy: Math.sin(heading) * 32,
+        vx: Math.cos(heading) * rand(26, 44),
+        vy: Math.sin(heading) * rand(26, 44),
         heading,
         cruiseHeading: heading,
         turnRate: 0,
         turnBias: 0,
-        phi: init.phi,
-        contraction: sampleContraction(init.phi, bio.tauC, bio.tauR),
+        phi: initPhi,
+        contraction: sampleContraction(initPhi, bio.tauC, bio.tauR),
         cDot: 0,
-        wander: 0,
-        passSide: init.passSide,
+        wander: rand(-0.2, 0.2),
+        passSide: tangentDir,
         depth,
         bioPulseAge: rand(0.2, 1.4),
         bioStartTheta: rand(0, TAU),
