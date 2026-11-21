@@ -1,18 +1,18 @@
 /**
- * Biomechanically grounded 360° free-swimming bioluminescent jellyfish bloom for OpenBuds:
+ * Biomechanically grounded open-ocean bioluminescent jellyfish bloom for OpenBuds:
  *
- * - 5 real species across depth tiers cruising in smooth, endless buoyant orbits around the
- *   centered hero headline — never stalling on the top edge or bunching in one corner:
+ * - 5 real species across depth tiers gliding naturally across open water:
  *     1. Pacific Sea Nettle (Chrysaora fuscescens) — hero foreground rower
  *     2. Moon Jelly (Aurelia aurita) — translucent saucer rower with 4 clover gonads
  *     3. Helmet Jelly (Periphylla periphylla) — prolate coronal jetter with crimson stomach
  *     4. Crystal Jelly (Aequorea victoria) — flat glass lens with GFP emerald margin wave
  *     5. Distant Moonlet (Aurelia) — deep background depth layer
  * - Asymmetric C2 fast-contraction / slow-elastic-relaxation stroke with Passive Energy
- *   Recapture (PER) coast boost and paired Lamb-Oseen vortex rings shed on contraction pinch-off.
- * - Full 360° orbital steering (inspired by ascii-sharks's Reynolds circulation + clearCentre)
- *   with asymmetric left-right bell contraction during turns and organic trailing oral arms
- *   and gossamer marginal tentacles streaming cleanly behind each bell's swimming direction.
+ *   Recapture (PER) coast boost and paired Lamb-Oseen vortex rings shed at pinch-off.
+ * - Open-ocean flow (no invisible walls!): jellyfish pulse along wide natural trajectories,
+ *   glide cleanly off any edge of the screen, and smoothly re-enter from a fresh uncrowded
+ *   edge and direction — while exact 2-pass bell-to-bell & bell-to-curtain collision
+ *   detection guarantees they never overlap on top of each other.
  */
 import { TAU, angleDiff, clamp, current, rand, randInt } from "./math";
 
@@ -72,10 +72,10 @@ export const BIOMECH: Record<JellySpecies, SpeciesBiomechanics> = {
     bellAspect: 0.56,
     viewTilt: 0.24,
     oralCount: 4,
-    oralLenMul: 1.45,
+    oralLenMul: 1.4,
     oralWidthMul: 0.135,
     tentacleCount: 9,
-    tentacleLenMul: 1.8,
+    tentacleLenMul: 1.75,
     tentacleFlare: 0.22,
     vortexOffset: 0.85,
   },
@@ -117,7 +117,7 @@ export const BIOMECH: Record<JellySpecies, SpeciesBiomechanics> = {
     oralLenMul: 0.38,
     oralWidthMul: 0.085,
     tentacleCount: 9,
-    tentacleLenMul: 1.3,
+    tentacleLenMul: 1.28,
     tentacleFlare: 0.54,
     vortexOffset: 0.58,
   },
@@ -138,7 +138,7 @@ export const BIOMECH: Record<JellySpecies, SpeciesBiomechanics> = {
     oralLenMul: 0.36,
     oralWidthMul: 0.08,
     tentacleCount: 10,
-    tentacleLenMul: 1.32,
+    tentacleLenMul: 1.3,
     tentacleFlare: 0.24,
     vortexOffset: 0.86,
   },
@@ -190,40 +190,32 @@ export interface Plankton {
 export interface Jellyfish {
   id: number;
   species: JellySpecies;
-  /** Relaxed bell diameter in CSS pixels. */
   bellDiameter: number;
-  /** Center of bell margin in CSS pixels. */
+  radius: number;
+  mass: number;
   x: number;
   y: number;
   vx: number;
   vy: number;
-  /**
-   * Full 360° swim heading in radians (0 = right, -PI/2 = straight up, +PI/2 = straight down).
-   * Renderer uses `rot = heading + PI/2` so the bell apex always leads forward along `heading`.
-   */
+  /** Full 360° swim heading in radians (0 = right, -PI/2 = up, +PI/2 = down). */
   heading: number;
-  /** Smoothed angular velocity (rad/s). */
+  /** Slowly evolving target cruise heading across open water so motion feels organic, never circular. */
+  cruiseHeading: number;
   turnRate: number;
-  /** Asymmetric left-right contraction bias (-0.22..+0.22) during turning pulses. */
   turnBias: number;
-  /** Normalized propulsion cycle phase phi in [0, 1). */
   phi: number;
   contraction: number;
   cDot: number;
-  /** Patrol orbit direction (+1 CW, -1 CCW) & preferred elliptical orbit radius. */
-  orbitDir: 1 | -1;
-  orbitRadius: number;
   wander: number;
+  /** Preferred side to bend around the center headline (+1 / -1). */
+  passSide: 1 | -1;
   depth: number;
-  /** Nerve-net bioluminescent wave clock. */
   bioPulseAge: number;
   bioStartTheta: number;
   nextBioAt: number;
-  /** Central frilled silk oral-arm fluid chains. */
   oralArms: Float32Array[];
   oralLens: Float32Array;
   oralRoots: Float32Array;
-  /** Hair-thin marginal tentacle fluid chains + per-strand organic phase offsets. */
   tentacles: Float32Array[];
   tentacleLens: Float32Array;
   tentacleRoots: Float32Array;
@@ -284,50 +276,153 @@ export class JellyfishWorld {
       p.x = clamp(p.x, 0, width);
       p.y = clamp(p.y, 0, height);
     }
-    for (const j of this.jellies) {
-      j.x = clamp(j.x, j.bellDiameter * 0.45, width - j.bellDiameter * 0.45);
-      j.y = clamp(j.y, 90, height - j.bellDiameter * 0.45);
+  }
+
+  /** Align all oral-arm & tentacle chain nodes cleanly behind (x, y) along `heading`. */
+  private resetAppendages(j: Jellyfish) {
+    const bio = BIOMECH[j.species];
+    const backAngle = j.heading + Math.PI;
+    const rightX = -Math.sin(j.heading);
+    const rightY = Math.cos(j.heading);
+
+    for (let arm = 0; arm < bio.oralCount; arm++) {
+      const nodes = j.oralArms[arm];
+      const seg = j.oralLens[arm] / (ORAL_NODES - 1);
+      const rx = j.x + rightX * j.oralRoots[arm] * j.bellDiameter;
+      const ry = j.y + rightY * j.oralRoots[arm] * j.bellDiameter;
+      for (let k = 0; k < ORAL_NODES; k++) {
+        const s = k / (ORAL_NODES - 1);
+        const sway = Math.sin(s * 4.2 + arm * 1.4) * j.bellDiameter * 0.08 * s;
+        nodes[k * 2] = rx + Math.cos(backAngle) * seg * k + rightX * sway;
+        nodes[k * 2 + 1] = ry + Math.sin(backAngle) * seg * k + rightY * sway;
+      }
     }
+
+    for (let tIdx = 0; tIdx < bio.tentacleCount; tIdx++) {
+      const nodes = j.tentacles[tIdx];
+      const frac = bio.tentacleCount === 1 ? 0 : (tIdx / (bio.tentacleCount - 1)) * 2 - 1;
+      const seg = j.tentacleLens[tIdx] / (TENTACLE_NODES - 1);
+      const rx = j.x + rightX * j.tentacleRoots[tIdx] * j.bellDiameter;
+      const ry = j.y + rightY * j.tentacleRoots[tIdx] * j.bellDiameter;
+      for (let k = 0; k < TENTACLE_NODES; k++) {
+        const s = k / (TENTACLE_NODES - 1);
+        const sway = Math.sin(s * 5.2 + j.tentaclePhases[tIdx]) * j.bellDiameter * 0.1 * s;
+        const flare = frac * bio.tentacleFlare * j.bellDiameter * 0.2 * Math.sin(s * Math.PI * 0.65);
+        nodes[k * 2] = rx + Math.cos(backAngle) * seg * k + rightX * (sway + flare);
+        nodes[k * 2 + 1] = ry + Math.sin(backAngle) * seg * k + rightY * (sway + flare);
+      }
+    }
+  }
+
+  /**
+   * Once a jellyfish swims completely off-screen (including its trailing tentacles), re-enter it
+   * organically from a fresh uncrowded edge aimed diagonally across open water!
+   */
+  private respawnFromEdge(j: Jellyfish) {
+    const { width: W, height: H } = this;
+    const entryPad = j.radius + 36;
+
+    // Sample several candidate entry spots across all 4 edges & pick the one farthest from other jellies
+    let bestX = -entryPad;
+    let bestY = H * 0.5;
+    let bestHeading = 0;
+    let bestClearance = -1;
+
+    for (let attempt = 0; attempt < 10; attempt++) {
+      // Weighted toward bottom, left, and right (authentic upward/diagonal oceanic drift) + occasional top entry
+      const roll = Math.random();
+      const side = roll < 0.34 ? 3 : roll < 0.62 ? 0 : roll < 0.9 ? 1 : 2; // 0:L, 1:R, 2:T, 3:B
+      let x = 0;
+      let y = 0;
+      let targetX = W * 0.5;
+      let targetY = H * 0.5;
+
+      if (side === 0) {
+        // Enter from left edge, gliding diagonally up-right or down-right across the frame
+        x = -entryPad;
+        y = rand(H * 0.18, H * 0.88);
+        targetX = W * rand(0.65, 0.95);
+        targetY = y > H * 0.5 ? rand(H * 0.14, H * 0.45) : rand(H * 0.52, H * 0.85);
+      } else if (side === 1) {
+        // Enter from right edge, gliding diagonally up-left or down-left
+        x = W + entryPad;
+        y = rand(H * 0.18, H * 0.88);
+        targetX = W * rand(0.05, 0.35);
+        targetY = y > H * 0.5 ? rand(H * 0.14, H * 0.45) : rand(H * 0.52, H * 0.85);
+      } else if (side === 3) {
+        // Enter from bottom edge (classic jellyfish rising diagonally upward along flanks!)
+        const onLeft = Math.random() < 0.5;
+        x = onLeft ? rand(W * 0.06, W * 0.32) : rand(W * 0.68, W * 0.94);
+        y = H + entryPad;
+        targetX = onLeft ? rand(W * 0.08, W * 0.42) : rand(W * 0.58, W * 0.92);
+        targetY = rand(H * 0.1, H * 0.3);
+      } else {
+        // Enter gently from upper-left or upper-right corner (never straight behind navbar center)
+        const onLeft = Math.random() < 0.5;
+        x = onLeft ? rand(W * 0.06, W * 0.25) : rand(W * 0.75, W * 0.94);
+        y = -entryPad;
+        targetX = onLeft ? rand(W * 0.1, W * 0.35) : rand(W * 0.65, W * 0.9);
+        targetY = rand(H * 0.68, H * 0.92);
+      }
+
+      let minDist = Infinity;
+      for (const other of this.jellies) {
+        if (other === j) continue;
+        const d = Math.hypot(x - other.x, y - other.y) - (j.radius + other.radius);
+        if (d < minDist) minDist = d;
+      }
+
+      if (minDist > bestClearance) {
+        bestClearance = minDist;
+        bestX = x;
+        bestY = y;
+        bestHeading = Math.atan2(targetY - y, targetX - x);
+      }
+    }
+
+    j.x = bestX;
+    j.y = bestY;
+    j.heading = bestHeading;
+    j.cruiseHeading = bestHeading;
+    j.passSide = Math.random() < 0.5 ? 1 : -1;
+    j.vx = Math.cos(bestHeading) * 32;
+    j.vy = Math.sin(bestHeading) * 32;
+    j.turnRate = 0;
+    j.turnBias = 0;
+    j.wander = 0;
+    j.phi = rand(0, 1);
+    this.resetAppendages(j);
   }
 
   seed() {
     const { width: W, height: H } = this;
     const minSide = Math.min(W, H);
-    const baseBell = clamp(minSide * 0.24, 138, 224);
+    const baseBell = clamp(minSide * 0.225, 130, 210);
 
-    // Distribute all 5 jellyfish evenly around the full elliptical perimeter around the hero text
-    const seedOrbit: { angle: number; radiusMul: number; dir: 1 | -1; phi: number }[] = [
-      { angle: -2.65, radiusMul: 0.41, dir: 1, phi: 0.18 }, // Hero Sea Nettle (left-upper ascending)
-      { angle: -0.42, radiusMul: 0.4, dir: -1, phi: 0.62 }, // Moon Jelly (right-upper gliding)
-      { angle: 0.48, radiusMul: 0.39, dir: 1, phi: 0.38 }, // Helmet Jelly (right-lower curving)
-      { angle: 2.58, radiusMul: 0.38, dir: -1, phi: 0.82 }, // Crystal Jelly (left-lower rising)
-      { angle: -1.78, radiusMul: 0.39, dir: 1, phi: 0.5 }, // Distant Moonlet (upper sky)
+    // Initial natural open-water paths: each jellyfish starts in a distinct zone gliding along
+    // a different natural diagonal so frame 1 looks composed AND motion immediately flows across screen
+    const initialPaths: { x: number; y: number; heading: number; phi: number; passSide: 1 | -1 }[] = [
+      { x: 0.13, y: 0.42, heading: -1.18, phi: 0.16, passSide: -1 }, // Hero Sea Nettle pulsing up-right along left flank
+      { x: 0.86, y: 0.3, heading: 2.08, phi: 0.58, passSide: 1 }, // Moon Jelly gliding diagonally down-left on right
+      { x: 0.8, y: 0.74, heading: -1.85, phi: 0.35, passSide: 1 }, // Helmet Jelly rising smoothly from lower-right
+      { x: 0.22, y: 0.78, heading: -0.92, phi: 0.8, passSide: -1 }, // Crystal Jelly ascending from lower-left
+      { x: 0.42, y: 0.16, heading: -0.18, phi: 0.48, passSide: -1 }, // Distant Moonlet cruising across upper sky
     ];
 
     this.jellies = [];
     this.vortices = [];
 
-    const cxW = W * 0.5;
-    const cyW = H * 0.53; // Slightly below center to leave clean clearance under the 64px top nav
-    const aspectX = (W / minSide) * 0.88;
-
     for (let i = 0; i < this.specs.length; i++) {
       const { species, size, depth } = this.specs[i];
       const bio = BIOMECH[species];
       const bellDiameter = baseBell * size;
-      const seed = seedOrbit[i % seedOrbit.length];
-      const orbitRadius = minSide * seed.radiusMul;
-      const a = seed.angle + rand(-0.14, 0.14);
+      const radius = bellDiameter * (0.52 + bio.bellAspect * 0.12);
+      const mass = size * size;
+      const init = initialPaths[i % initialPaths.length];
 
-      const x = clamp(cxW + Math.cos(a) * orbitRadius * aspectX, bellDiameter * 0.55, W - bellDiameter * 0.55);
-      const y = clamp(cyW + Math.sin(a) * orbitRadius * 0.92, 115, H - bellDiameter * 0.55);
-      // Tangent heading along the elliptical orbit
-      const tx = -Math.sin(a) * aspectX * seed.dir;
-      const ty = Math.cos(a) * 0.92 * seed.dir;
-      const heading = Math.atan2(ty, tx);
-      const backAngle = heading + Math.PI;
-      const rightX = -Math.sin(heading);
-      const rightY = Math.cos(heading);
+      const x = W * (init.x + rand(-0.02, 0.02));
+      const y = H * (init.y + rand(-0.02, 0.02));
+      const heading = init.heading + rand(-0.14, 0.14);
 
       const oralArms: Float32Array[] = [];
       const oralLens = new Float32Array(bio.oralCount);
@@ -335,19 +430,8 @@ export class JellyfishWorld {
       for (let arm = 0; arm < bio.oralCount; arm++) {
         const frac = bio.oralCount === 1 ? 0 : (arm / (bio.oralCount - 1)) * 2 - 1;
         oralRoots[arm] = frac * 0.2;
-        const len = bellDiameter * bio.oralLenMul * (1 - Math.abs(frac) * 0.12 + rand(-0.06, 0.08));
-        oralLens[arm] = len;
-        const nodes = new Float32Array(ORAL_NODES * 2);
-        const seg = len / (ORAL_NODES - 1);
-        const rx = x + rightX * oralRoots[arm] * bellDiameter;
-        const ry = y + rightY * oralRoots[arm] * bellDiameter;
-        for (let k = 0; k < ORAL_NODES; k++) {
-          const s = k / (ORAL_NODES - 1);
-          const sway = Math.sin(s * 4.2 + arm * 1.4) * bellDiameter * 0.08 * s;
-          nodes[k * 2] = rx + Math.cos(backAngle) * seg * k + rightX * sway;
-          nodes[k * 2 + 1] = ry + Math.sin(backAngle) * seg * k + rightY * sway;
-        }
-        oralArms.push(nodes);
+        oralLens[arm] = bellDiameter * bio.oralLenMul * (1 - Math.abs(frac) * 0.12 + rand(-0.06, 0.08));
+        oralArms.push(new Float32Array(ORAL_NODES * 2));
       }
 
       const tentacles: Float32Array[] = [];
@@ -359,40 +443,30 @@ export class JellyfishWorld {
         tentacleRoots[tIdx] = frac * 0.46;
         tentaclePhases[tIdx] = rand(0, TAU);
         const alt = tIdx % 2 === 0 ? 1.12 : 0.64;
-        const len =
+        tentacleLens[tIdx] =
           bellDiameter * bio.tentacleLenMul * alt * (1 - Math.abs(frac) * 0.14 + rand(-0.12, 0.14));
-        tentacleLens[tIdx] = len;
-        const nodes = new Float32Array(TENTACLE_NODES * 2);
-        const seg = len / (TENTACLE_NODES - 1);
-        const rx = x + rightX * tentacleRoots[tIdx] * bellDiameter;
-        const ry = y + rightY * tentacleRoots[tIdx] * bellDiameter;
-        for (let k = 0; k < TENTACLE_NODES; k++) {
-          const s = k / (TENTACLE_NODES - 1);
-          const sway = Math.sin(s * 5.2 + tentaclePhases[tIdx]) * bellDiameter * 0.11 * s;
-          const flare = frac * bio.tentacleFlare * bellDiameter * 0.2 * Math.sin(s * Math.PI * 0.65);
-          nodes[k * 2] = rx + Math.cos(backAngle) * seg * k + rightX * (sway + flare);
-          nodes[k * 2 + 1] = ry + Math.sin(backAngle) * seg * k + rightY * (sway + flare);
-        }
-        tentacles.push(nodes);
+        tentacles.push(new Float32Array(TENTACLE_NODES * 2));
       }
 
-      this.jellies.push({
+      const jelly: Jellyfish = {
         id: i + 1,
         species,
         bellDiameter,
+        radius,
+        mass,
         x,
         y,
-        vx: Math.cos(heading) * 18,
-        vy: Math.sin(heading) * 18,
+        vx: Math.cos(heading) * 32,
+        vy: Math.sin(heading) * 32,
         heading,
+        cruiseHeading: heading,
         turnRate: 0,
         turnBias: 0,
-        phi: seed.phi,
-        contraction: sampleContraction(seed.phi, bio.tauC, bio.tauR),
+        phi: init.phi,
+        contraction: sampleContraction(init.phi, bio.tauC, bio.tauR),
         cDot: 0,
-        orbitDir: seed.dir,
-        orbitRadius,
         wander: 0,
+        passSide: init.passSide,
         depth,
         bioPulseAge: rand(0.2, 1.4),
         bioStartTheta: rand(0, TAU),
@@ -404,11 +478,12 @@ export class JellyfishWorld {
         tentacleLens,
         tentacleRoots,
         tentaclePhases,
-      });
+      };
+      this.resetAppendages(jelly);
+      this.jellies.push(jelly);
     }
     this.jellies.sort((a, b) => a.depth - b.depth);
 
-    // Seed bioluminescent plankton schools
     const total = clamp(Math.round((W * H) / 4800), 90, 260);
     this.plankton = [];
     while (this.plankton.length < total) {
@@ -451,7 +526,7 @@ export class JellyfishWorld {
       const dy = j.y - y;
       const d = Math.hypot(dx, dy);
       if (d < 340 && d > 1e-3) {
-        const push = (1 - d / 340) * 44;
+        const push = (1 - d / 340) * 58;
         j.vx += (dx / d) * push;
         j.vy += (dy / d) * push;
         j.bioPulseAge = 0;
@@ -677,13 +752,12 @@ export class JellyfishWorld {
 
   private stepJellies(dt: number) {
     const { jellies, width: W, height: H, time } = this;
-    const minSide = Math.min(W, H);
     const cxW = W * 0.5;
-    const cyW = H * 0.53;
-    const aspectX = (W / minSide) * 0.88;
+    const cyW = H * 0.5;
     const cur = this.tmpCur;
     const vort = { x: 0, y: 0 };
 
+    // ── Pass 1: Natural Open-Ocean Cruise, Gentle Avoidance & Propulsion ──
     for (const j of jellies) {
       const bio = BIOMECH[j.species];
       const prevPhi = j.phi;
@@ -702,65 +776,54 @@ export class JellyfishWorld {
         j.nextBioAt = time + rand(3.8, 6.8);
       }
 
-      // 1. Full 360° Reynolds-style orbital steering around the hero calm pool (never stalls on ceiling!)
-      let dx = Math.cos(j.heading);
-      let dy = Math.sin(j.heading);
+      // 1. Open-ocean cruising: slow organic heading drift + ambient current influence
+      j.wander = clamp(j.wander + (Math.random() - 0.5) * dt * 0.45, -0.35, 0.35);
+      j.cruiseHeading += j.wander * dt * 0.35;
 
-      // Gentle unscripted wander
-      j.wander = clamp(j.wander + (Math.random() - 0.5) * dt * 1.4, -0.9, 0.9);
-      dx += Math.cos(j.heading + j.wander) * 0.32;
-      dy += Math.sin(j.heading + j.wander) * 0.32;
+      let dx = Math.cos(j.cruiseHeading) * 1.6 + Math.cos(j.heading) * 0.6;
+      let dy = Math.sin(j.cruiseHeading) * 1.6 + Math.sin(j.heading) * 0.6;
 
-      // Smooth elliptical perimeter circulation around the centered hero text
-      const rx = (j.x - cxW) / aspectX;
-      const ry = (j.y - cyW) / 0.92;
-      const r = Math.hypot(rx, ry) || 1;
-      const targetR = j.orbitRadius * (1 + 0.14 * Math.sin(time * 0.09 + j.id * 1.7));
-      const radial = clamp((targetR - r) / targetR, -1, 1);
-      dx += ((-ry / r) * j.orbitDir + (rx / r) * radial * 0.95) * 0.82;
-      dy += ((rx / r) * j.orbitDir + (ry / r) * radial * 0.95) * 0.82;
+      // Gentle sway from the divergence-free ambient ocean current
+      current(j.x, j.y, time, cur);
+      dx += cur.x * 0.008;
+      dy += cur.y * 0.008;
 
-      // Clear elliptical sanctuary in the center for effortless headline legibility
+      // Graceful gliding deflection around the central hero headline (no hard stops, no circling!)
       if (this.clearCentre) {
-        const ex = (j.x - cxW) / (W * 0.35 + j.bellDiameter * 0.25);
-        const ey = (j.y - H * 0.5) / (H * 0.3 + j.bellDiameter * 0.2);
+        const clearRx = W * 0.275 + j.radius * 0.45;
+        const clearRy = H * 0.245 + j.radius * 0.35;
+        const ex = (j.x - cxW) / clearRx;
+        const ey = (j.y - cyW) / clearRy;
         const e2 = ex * ex + ey * ey;
-        if (e2 < 1) {
+        if (e2 < 1.35) {
           const e = Math.sqrt(e2) || 1e-3;
-          const push = (1 - e) * 3.8;
-          dx += (ex / e) * push;
-          dy += (ey / e) * push;
+          const w = clamp((1.35 - e) / 1.35, 0, 1);
+          const nx = ex / e;
+          const ny = ey / e;
+          // Tangential flow smoothly bends the jelly's trajectory around the headline block
+          const t1x = -ny;
+          const t1y = nx;
+          const sign = Math.cos(j.heading) * t1x + Math.sin(j.heading) * t1y >= 0 ? 1 : -1;
+          dx += (nx * 1.2 + t1x * sign * 1.35) * w * 2.2;
+          dy += (ny * 1.2 + t1y * sign * 1.35) * w * 2.2;
         }
       }
 
-      // Give other jellyfish generous room across all 4 quadrants
+      // Anticipatory pairwise avoidance so jellies glide gracefully around each other before touching
       for (const other of jellies) {
         if (other === j) continue;
         const ox = j.x - other.x;
         const oy = j.y - other.y;
         const d = Math.hypot(ox, oy);
-        const range = (j.bellDiameter + other.bellDiameter) * 1.15;
-        if (d < range && d > 1e-3) {
-          const w = (1 - d / range) * 3.2;
-          dx += (ox / d) * w;
-          dy += (oy / d) * w;
+        const avoidR = (j.radius + other.radius) * 2.35;
+        if (d < avoidR && d > 1e-3) {
+          const w = Math.pow(1 - d / avoidR, 1.35) * 3.8;
+          const nx = ox / d;
+          const ny = oy / d;
+          const cross = Math.cos(j.heading) * ny - Math.sin(j.heading) * nx >= 0 ? 1 : -1;
+          dx += (nx + -ny * cross * 0.45) * w;
+          dy += (ny + nx * cross * 0.45) * w;
         }
-      }
-
-      // Soft viewport containment (especially respecting the 64px top navbar so bells never clip it!)
-      const topInset = 98 + j.bellDiameter * bio.bellAspect * 0.45;
-      const botInset = j.bellDiameter * 0.52;
-      const sideInset = j.bellDiameter * 0.46;
-      const band = j.bellDiameter * 0.85;
-      if (j.y < topInset + band) {
-        dy += clamp((topInset + band - j.y) / band, 0, 1.5) * 3.2;
-      } else if (j.y > H - botInset - band) {
-        dy -= clamp((j.y - (H - botInset - band)) / band, 0, 1.5) * 2.8;
-      }
-      if (j.x < sideInset + band) {
-        dx += clamp((sideInset + band - j.x) / band, 0, 1.5) * 3.0;
-      } else if (j.x > W - sideInset - band) {
-        dx -= clamp((j.x - (W - sideInset - band)) / band, 0, 1.5) * 3.0;
       }
 
       // Pointer repulsion
@@ -768,48 +831,52 @@ export class JellyfishWorld {
         const px = j.x - this.pointer.x;
         const py = j.y - this.pointer.y;
         const pd = Math.hypot(px, py);
-        const pr = j.bellDiameter * 1.2 + 70;
+        const pr = j.radius * 1.8 + 75;
         if (pd < pr && pd > 1e-3) {
-          const w = (1 - pd / pr) * 2.4;
+          const w = (1 - pd / pr) * 2.6;
           dx += (px / pd) * w;
           dy += (py / pd) * w;
         }
       }
 
-      // Smooth skidding turn driven by asymmetric contraction during active pulses
+      // 2. Speed-coupled smooth turning (wide oceanic curvature, never rotating in place!)
       const desiredHeading = Math.atan2(dy, dx);
       const err = angleDiff(j.heading, desiredHeading);
       const posDot = Math.max(0, cDot);
       const negDot = Math.min(0, cDot);
-      const turnAuthority = 0.42 + 0.58 * clamp(posDot * 0.65 + c * 0.5, 0, 1);
-      const maxTurn = 0.85 * turnAuthority * dt;
+      const curSpeed = Math.hypot(j.vx, j.vy);
+      const turnCap = clamp(curSpeed / (j.bellDiameter * 0.55), 0.22, 0.58);
+      const strokeAuthority = 0.45 + 0.55 * clamp(posDot * 0.6 + c * 0.5, 0, 1);
+      const maxTurn = turnCap * strokeAuthority * dt;
       const turned = clamp(err, -maxTurn, maxTurn);
       j.heading += turned;
+      // Gently let cruiseHeading follow large deflections (like avoiding another jelly) so paths stay natural
+      j.cruiseHeading += angleDiff(j.cruiseHeading, j.heading) * Math.min(1, dt * 0.22);
       j.turnRate += (turned / dt - j.turnRate) * Math.min(1, dt * 3.5);
-      j.turnBias = clamp(err * 0.35, -0.22, 0.22);
+      j.turnBias = clamp(err * 0.32, -0.22, 0.22);
 
-      // 2. Asymmetric propulsion thrust along 360° heading + Passive Energy Recapture (PER) coast
+      // 3. Asymmetric pulsing propulsion + Passive Energy Recapture (cruises naturally 28–74 px/s)
       const tauP = Math.max(0, 1 - (bio.tauC + bio.tauR));
       const phiPer = (bio.tauC + bio.tauR + 0.3 * tauP) % 1;
       const dPer = wrappedDelta(j.phi, phiPer);
       const perBoost = bio.kPer * Math.exp(-(dPer * dPer) / (2 * 0.11 * 0.11));
 
       const rawThrust =
-        bio.kJet * posDot * posDot * 0.22 + bio.kRow * posDot * 0.72 + 0.08 * negDot + perBoost;
-      const thrustMag = (14 + rawThrust * (32 + j.bellDiameter * 0.14)) * (0.78 + 0.22 * j.depth);
+        bio.kJet * posDot * posDot * 0.26 + bio.kRow * posDot * 0.85 + 0.06 * negDot + perBoost;
+      const thrustMag = (28 + rawThrust * (54 + j.bellDiameter * 0.16)) * (0.8 + 0.2 * j.depth);
 
       const fwdX = Math.cos(j.heading);
       const fwdY = Math.sin(j.heading);
       const rightX = -fwdY;
       const rightY = fwdX;
 
-      // Shed paired counter-rotating toroidal vortex ring at contraction pinch-off (phi crosses tauC)
+      // Shed paired counter-rotating toroidal vortex ring at contraction pinch-off
       if (prevPhi < bio.tauC && j.phi >= bio.tauC) {
         const rShed = j.bellDiameter * 0.5 * (1 - bio.deltaR * 0.7) * bio.vortexOffset;
         const backDist = j.bellDiameter * 0.2;
         const bx = j.x - fwdX * backDist;
         const by = j.y - fwdY * backDist;
-        const jetSpeed = 26 + j.bellDiameter * 0.14;
+        const jetSpeed = 28 + j.bellDiameter * 0.14;
         const baseGamma = (5200 + j.bellDiameter * 34) * j.depth;
 
         if (this.vortices.length < 24) {
@@ -840,30 +907,60 @@ export class JellyfishWorld {
         );
       }
 
-      // Integrate velocity with ambient ocean current & shape-dependent viscous drag (neutrally buoyant!)
-      current(j.x, j.y, time, cur);
-      const ax = fwdX * thrustMag + cur.x * 0.12;
-      const ay = fwdY * thrustMag + cur.y * 0.12;
-      const frontalDrag = 1 - 0.3 * c;
-      const speed = Math.hypot(j.vx, j.vy);
-      const drag = Math.exp(-dt * (1.28 * frontalDrag + speed * 0.01));
+      const ax = fwdX * thrustMag + cur.x * 0.1;
+      const ay = fwdY * thrustMag + cur.y * 0.1;
+      const frontalDrag = 1 - 0.34 * c;
+      const drag = Math.exp(-dt * (1.02 * frontalDrag + curSpeed * 0.008));
       j.vx = (j.vx + ax * dt) * drag;
       j.vy = (j.vy + ay * dt) * drag;
 
-      j.x = clamp(j.x + j.vx * dt, sideInset * 0.6, W - sideInset * 0.6);
-      j.y = clamp(j.y + j.vy * dt, 86, H - botInset * 0.6);
+      const spd = Math.hypot(j.vx, j.vy);
+      const minGlide = 22 * (0.76 + 0.24 * j.depth);
+      const maxGlide = 78;
+      if (spd < minGlide && spd > 1e-3) {
+        j.vx = (j.vx / spd) * minGlide;
+        j.vy = (j.vy / spd) * minGlide;
+      } else if (spd > maxGlide) {
+        j.vx = (j.vx / spd) * maxGlide;
+        j.vy = (j.vy / spd) * maxGlide;
+      }
 
-      // 3. Trailing Oral Arms & Gossamer Marginal Tentacles (streaming cleanly behind -heading!)
+      j.x += j.vx * dt;
+      j.y += j.vy * dt;
+    }
+
+    // ── Pass 2: Hard Multi-Body Collision Detection & Separation (Never Overlap!) ──
+    this.resolveCollisions();
+
+    // ── Pass 3: Seamless Off-Screen Exit & Fresh-Edge Re-Entry ──
+    for (const j of jellies) {
+      // Wait until the bell & visible trailing oral curtains have smoothly cleared the viewport edge
+      const exitMargin = j.radius + j.bellDiameter * 0.65 + 32;
+      if (
+        j.x < -exitMargin ||
+        j.x > W + exitMargin ||
+        j.y < -exitMargin ||
+        j.y > H + exitMargin
+      ) {
+        this.respawnFromEdge(j);
+      }
+    }
+
+    // ── Pass 4: Update Trailing Oral Arms & Marginal Tentacles from Resolved Poses ──
+    for (const j of jellies) {
+      const bio = BIOMECH[j.species];
+      const fwdX = Math.cos(j.heading);
+      const fwdY = Math.sin(j.heading);
+      const rightX = -fwdY;
+      const rightY = fwdX;
       const backAngle = j.heading + Math.PI;
       const marginC = sampleContraction(j.phi - bio.phaseLagBell - bio.phaseLagSkirt * 0.2, bio.tauC, bio.tauR);
       const rEff = j.bellDiameter * 0.5 * (1 - bio.deltaR * marginC);
-      // Blend backward axis with actual fluid wake (-velocity) + tiny organic gravity sag (+4 down)
       const trailAngle = Math.atan2(
-        Math.sin(backAngle) * 34 - j.vy * 0.55 + 4,
-        Math.cos(backAngle) * 34 - j.vx * 0.55,
+        Math.sin(backAngle) * 38 - j.vy * 0.5 + 3,
+        Math.cos(backAngle) * 38 - j.vx * 0.5,
       );
 
-      // Central frilled silk oral arms
       for (let arm = 0; arm < bio.oralCount; arm++) {
         const nodes = j.oralArms[arm];
         const rootU = j.oralRoots[arm] * j.bellDiameter * (1 - bio.deltaR * 0.45 * marginC);
@@ -882,7 +979,7 @@ export class JellyfishWorld {
           const natural = trailAngle + j.oralRoots[arm] * 0.22 + wave;
 
           let ang = Math.atan2(nodes[k * 2 + 1] - py, nodes[k * 2] - px);
-          ang += angleDiff(ang, natural) * Math.min(1, dt * (2.4 + s * 1.1));
+          ang += angleDiff(ang, natural) * Math.min(1, dt * (2.6 + s * 1.2));
           ang = prevAng + clamp(angleDiff(prevAng, ang), -maxBend, maxBend);
 
           nodes[k * 2] = px + Math.cos(ang) * seg;
@@ -891,7 +988,6 @@ export class JellyfishWorld {
         }
       }
 
-      // Hair-thin marginal tentacles (independent phases so they ribbon organically instead of combing!)
       for (let tIdx = 0; tIdx < bio.tentacleCount; tIdx++) {
         const nodes = j.tentacles[tIdx];
         const frac = bio.tentacleCount === 1 ? 0 : (tIdx / (bio.tentacleCount - 1)) * 2 - 1;
@@ -901,7 +997,7 @@ export class JellyfishWorld {
         nodes[0] = j.x + rightX * rimU + Math.cos(backAngle) * rimBack;
         nodes[1] = j.y + rightY * rimU + Math.sin(backAngle) * rimBack;
 
-        const retract = j.species === "helmet" ? 1 - 0.16 * c : 1;
+        const retract = j.species === "helmet" ? 1 - 0.16 * j.contraction : 1;
         const seg = (j.tentacleLens[tIdx] * retract) / (TENTACLE_NODES - 1);
         const maxBend = j.species === "helmet" ? 0.22 : 0.34;
         const strandPhase = j.tentaclePhases[tIdx];
@@ -921,7 +1017,7 @@ export class JellyfishWorld {
           const natural = trailAngle + flareCurve + wave + clamp(vortCross, -0.35, 0.35);
 
           let ang = Math.atan2(nodes[k * 2 + 1] - py, nodes[k * 2] - px);
-          ang += angleDiff(ang, natural) * Math.min(1, dt * (2.0 + s * 1.1));
+          ang += angleDiff(ang, natural) * Math.min(1, dt * (2.2 + s * 1.2));
           ang = prevAng + clamp(angleDiff(prevAng, ang), -maxBend, maxBend);
 
           nodes[k * 2] = px + Math.cos(ang) * seg;
@@ -929,6 +1025,120 @@ export class JellyfishWorld {
           prevAng = ang;
         }
       }
+    }
+  }
+
+  /**
+   * 3-iteration exact elastic collision solver:
+   * - Enforces zero bell-on-bell overlap (mass-weighted separation + elastic fluid bounce +
+   *   heading/cruise deflection + bioluminescent tactile startle flash)
+   * - Cushions bells away from other jellies' trailing oral curtains
+   * - Keeps bells outside the inner hero headline text block
+   */
+  private resolveCollisions() {
+    const { jellies, width: W, height: H } = this;
+    const n = jellies.length;
+    const cxW = W * 0.5;
+    const cyW = H * 0.5;
+
+    for (let iter = 0; iter < 3; iter++) {
+      for (let i = 0; i < n; i++) {
+        const a = jellies[i];
+        for (let k = i + 1; k < n; k++) {
+          const b = jellies[k];
+          let dx = b.x - a.x;
+          let dy = b.y - a.y;
+          let d = Math.hypot(dx, dy);
+          const minDist = a.radius + b.radius + 26;
+
+          if (d < minDist) {
+            if (d < 1e-3) {
+              dx = 1;
+              dy = 0;
+              d = 1;
+            }
+            const nx = dx / d;
+            const ny = dy / d;
+            const overlap = minDist - d;
+            const invA = 1 / a.mass;
+            const invB = 1 / b.mass;
+            const invSum = invA + invB;
+
+            a.x -= nx * overlap * (invA / invSum);
+            a.y -= ny * overlap * (invA / invSum);
+            b.x += nx * overlap * (invB / invSum);
+            b.y += ny * overlap * (invB / invSum);
+
+            if (iter === 0) {
+              const rvx = b.vx - a.vx;
+              const rvy = b.vy - a.vy;
+              const velAlongNormal = rvx * nx + rvy * ny;
+              if (velAlongNormal < 0) {
+                const impulse = (-1.35 * velAlongNormal) / invSum;
+                a.vx -= impulse * invA * nx;
+                a.vy -= impulse * invA * ny;
+                b.vx += impulse * invB * nx;
+                b.vy += impulse * invB * ny;
+
+                const awayA = Math.atan2(-ny, -nx);
+                const awayB = Math.atan2(ny, nx);
+                a.heading += clamp(angleDiff(a.heading, awayA), -0.22, 0.22);
+                b.heading += clamp(angleDiff(b.heading, awayB), -0.22, 0.22);
+                a.cruiseHeading += clamp(angleDiff(a.cruiseHeading, awayA), -0.25, 0.25);
+                b.cruiseHeading += clamp(angleDiff(b.cruiseHeading, awayB), -0.25, 0.25);
+
+                if (a.bioPulseAge > 0.6) {
+                  a.bioPulseAge = 0;
+                  a.bioStartTheta = Math.atan2(ny, nx);
+                }
+                if (b.bioPulseAge > 0.6) {
+                  b.bioPulseAge = 0;
+                  b.bioStartTheta = Math.atan2(-ny, -nx);
+                }
+              }
+            }
+          }
+
+          if (iter === 0) {
+            this.cushionBellVsTrailing(a, b);
+            this.cushionBellVsTrailing(b, a);
+          }
+        }
+      }
+
+      // Inner hero headline keep-out guard (never push a bell directly onto the hero title!)
+      if (this.clearCentre) {
+        for (const j of jellies) {
+          const guardRx = W * 0.21 + j.radius * 0.45;
+          const guardRy = H * 0.175 + j.radius * 0.35;
+          const ex = (j.x - cxW) / guardRx;
+          const ey = (j.y - cyW) / guardRy;
+          const e = Math.hypot(ex, ey);
+          if (e < 1 && e > 1e-4) {
+            j.x = cxW + (ex / e) * guardRx;
+            j.y = cyW + (ey / e) * guardRy;
+          }
+        }
+      }
+    }
+  }
+
+  private cushionBellVsTrailing(a: Jellyfish, b: Jellyfish) {
+    if (!b.oralArms.length) return;
+    const midArm = b.oralArms[Math.floor(b.oralArms.length / 2)];
+    const midIdx = Math.floor(ORAL_NODES * 0.45) * 2;
+    const tx = midArm[midIdx];
+    const ty = midArm[midIdx + 1];
+    const dx = a.x - tx;
+    const dy = a.y - ty;
+    const d = Math.hypot(dx, dy);
+    const minD = a.radius + b.bellDiameter * 0.28;
+    if (d < minD && d > 1e-3) {
+      const push = (minD - d) * 0.4;
+      a.x += (dx / d) * push;
+      a.y += (dy / d) * push;
+      a.vx += (dx / d) * 12;
+      a.vy += (dy / d) * 12;
     }
   }
 }
