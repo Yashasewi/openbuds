@@ -304,13 +304,13 @@ const BUDS3 = makeProfile(
     switchesReadable: [SWITCHES.gameMode, SWITCHES.wearDetection, SWITCHES.dualConnection],
     switchesWritable: [SWITCHES.gameMode, SWITCHES.wearDetection],
     featureQuery: [6, 4, 17],
-    // 0x0406 ids 0..3 were each acknowledged and read back through 0x010F. Names are in the order the
-    // owner's phone app lists its presets (screenshot, 2026-11-22); the id-to-name match follows that order
-    // and was not read back separately. Not taken from any vendor app's files.
+    // 0x0406 ids 0..3 were each acknowledged and read back through 0x010F. Names checked on the owner's
+    // Buds 3 (2026-11-22): each preset picked in the phone app, and the id the buds reported read on the
+    // computer. The phone lists them Balanced, Serenade, Bass, Bold; the ids differ from that order.
     eqPresets: [
       { id: 0, label: "Balanced", note: "Default" },
-      { id: 1, label: "Serenade" },
-      { id: 2, label: "Bass" },
+      { id: 1, label: "Bass" },
+      { id: 2, label: "Serenade" },
       { id: 3, label: "Bold" },
     ],
     // Custom EQ (0x0122, 0x0418) was never captured.

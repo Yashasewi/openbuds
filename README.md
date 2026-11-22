@@ -101,7 +101,7 @@ Then open [localhost:5173](http://localhost:5173/) in Chrome. Use `localhost`, n
 | Earbuds | Status | Tested firmware |
 |---|---|---|
 | OnePlus Buds 4 (`065414`) | Supported | 138.138.105 |
-| OnePlus Buds 3 (`063C14`) | **Experimental**: noise control (no Adaptive), 4 EQ presets (Balanced, Serenade, Bass, Bold), game mode and wear detection, touch gestures, battery and wear. No hold cycle, custom EQ or tools. Dual connection is shown but can't be changed here | 127.127.101 |
+| OnePlus Buds 3 (`063C14`) | **Experimental**: noise control (no Adaptive), 4 EQ presets (Balanced, Bass, Serenade, Bold), game mode and wear detection, touch gestures, battery and wear. No hold cycle, custom EQ or tools. Dual connection is shown but can't be changed here | 127.127.101 |
 | Anything else | Read-only: OpenBuds shows the model and firmware and a **Copy diagnostics** button. It only reads identity, firmware, offered events and feature states, and answers the earbuds' time request (`0x0500`). It never sends a setting change | |
 
 Buds 3 support rests on one owner capture over RFCOMM (the web app's route). The Mac app reaches the earbuds over GATT, which has not been exchanged with a Buds 3 yet, so it may not connect. See [PROTOCOL.md](PROTOCOL.md#per-model-differences). If you own a Buds 3 or another model, a report from the Copy diagnostics button helps.

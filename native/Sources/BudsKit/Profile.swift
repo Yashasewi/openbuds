@@ -165,10 +165,10 @@ extension ModelProfile {
     switchesReadable: [Switch.gameMode.rawValue, Switch.wearDetection.rawValue, Switch.dualConnection.rawValue],
     switchesWritable: [Switch.gameMode.rawValue, Switch.wearDetection.rawValue],
     featureQuery: [6, 4, 17],
-    // 0x0406 ids 0..3 were each acknowledged and read back through 0x010F. Names are in the order the
-    // owner's phone app lists its presets (screenshot, 2026-11-22); the id-to-name match follows that order
-    // and was not read back separately. Not taken from any vendor app's files.
-    eqPresets: ["Balanced", "Serenade", "Bass", "Bold"].enumerated().map { Preset(id: $0.offset, name: $0.element) },
+    // 0x0406 ids 0..3 were each acknowledged and read back through 0x010F. Names checked on the owner's
+    // Buds 3 (2026-11-22): each preset picked in the phone app, and the id the buds reported read on the
+    // computer. The phone lists them Balanced, Serenade, Bass, Bold; the ids differ from that order.
+    eqPresets: ["Balanced", "Bass", "Serenade", "Bold"].enumerated().map { Preset(id: $0.offset, name: $0.element) },
     // Custom EQ (0x0122, 0x0418) was never captured.
     customEq: false,
     // Same menus as Buds 4 without function 17 (game mode), which the capture did not show on this model.
