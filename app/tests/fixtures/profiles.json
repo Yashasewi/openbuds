@@ -188,19 +188,19 @@
     "eqPresets": [
       [
         0,
-        "Preset 1"
+        "Balanced"
       ],
       [
         1,
-        "Preset 2"
+        "Serenade"
       ],
       [
         2,
-        "Preset 3"
+        "Bass"
       ],
       [
         3,
-        "Preset 4"
+        "Bold"
       ]
     ],
     "customEq": false,

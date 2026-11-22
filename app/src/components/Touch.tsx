@@ -87,9 +87,13 @@ function GestureRow({ ear, action, fn }: { ear: Ear; action: number; fn: number 
         />
       }
     >
-      {action === 4 && fn === 8 && state.holdCycle && state.profile?.holdModes.length && (
-        <HoldCycle modes={state.holdCycle.modes} offered={state.profile.holdModes} />
-      )}
+      {action === 4 &&
+        fn === 8 &&
+        state.holdCycle &&
+        state.profile &&
+        state.profile.holdModes.length > 0 && (
+          <HoldCycle modes={state.holdCycle.modes} offered={state.profile.holdModes} />
+        )}
     </Row>
   );
 }

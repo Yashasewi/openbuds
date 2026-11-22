@@ -2,7 +2,7 @@ import { NowPanel } from "./components/NowPanel";
 import { MacDownload, SiteFooter, SiteHeader } from "./components/Site";
 import { About, Connections, Features } from "./components/Other";
 import { Sound } from "./components/Sound";
-import { Tools } from "./components/Tools";
+import { Tools, offersTools } from "./components/Tools";
 import { Touch } from "./components/Touch";
 import { Button, Dialog, cx } from "./components/ui";
 import { useBuds, useConfirmRequest } from "./lib/store";
@@ -21,6 +21,8 @@ export function App() {
   const connected = connection === "connected";
   const hasData = !!state.profile;
   const unsupported = state.unsupported;
+  // Buds 3 has no tools; drop the section and its nav link instead of leaving a dead link and a gap.
+  const sections = SECTIONS.filter(([id]) => id !== "tools" || offersTools());
 
   return (
     <>
@@ -36,7 +38,7 @@ export function App() {
                 aria-label="Sections"
                 className="mb-8 flex flex-wrap gap-x-5 gap-y-2 text-[0.92rem] text-ink/55"
               >
-                {SECTIONS.map(([id, label]) => (
+                {sections.map(([id, label]) => (
                   <a key={id} href={`#${id}`} className="rounded transition-colors hover:text-tip">
                     {label}
                   </a>
@@ -68,9 +70,11 @@ export function App() {
                 <div id="connections">
                   <Connections />
                 </div>
-                <div id="tools">
-                  <Tools />
-                </div>
+                {offersTools() && (
+                  <div id="tools">
+                    <Tools />
+                  </div>
+                )}
                 <div id="about">
                   <About />
                 </div>
@@ -80,7 +84,10 @@ export function App() {
           ) : unsupported ? (
             <p className="lg:pt-16 max-w-[48ch] text-[1.05rem] text-ink/70">
               These earbuds (model {unsupported.productId}) aren’t supported yet, so OpenBuds only
-              reads them. Use Copy diagnostics on the left and attach it to a GitHub issue.
+              reads them.{" "}
+              {connected
+                ? "Use Copy diagnostics on the left and attach it to a GitHub issue."
+                : "Connect them again to copy the diagnostics for a GitHub issue."}
             </p>
           ) : (
             <Intro />

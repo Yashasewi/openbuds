@@ -3,6 +3,9 @@ import { HEARING_LOUD, HEARING_START, HEARING_STOPS, type FitResult } from "../l
 import { confirm, run, session, useAction, useBuds } from "../lib/store";
 import { Button, Dialog, Group, Row } from "./ui";
 
+/** Find, fit test or hearing test, offered by the buds and allowed by the model's profile. */
+export const offersTools = () => [0x0400, 0x0405, 0x040d].some((c) => session.supports(c));
+
 const FREQUENCIES = ["250 Hz", "500 Hz", "1 kHz", "2 kHz", "4 kHz", "8 kHz"];
 
 export function Tools() {
@@ -55,7 +58,7 @@ export function Tools() {
     );
   }
 
-  if (![0x0400, 0x0405, 0x040d].some((c) => session.supports(c))) return null;
+  if (!offersTools()) return null;
   return (
     <Group title="Tools">
       {session.supports(0x0400) && (

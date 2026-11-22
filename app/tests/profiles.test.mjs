@@ -116,7 +116,8 @@ test("Buds 3 refuses everything outside its profile", () => {
   assert.doesNotThrow(() => encode(p, 0x0404, 9, noiseModePayload("smart")));
   assert.doesNotThrow(() => encode(p, 0x0403, 9, [6, 1]));
   assert.doesNotThrow(() => encode(p, 0x0403, 9, [4, 0]));
-  assert.doesNotThrow(() => encode(p, 0x010c, 9, [4, 1]));
+  refused(0x010c, [4, 1]); // smart level was only seen as a push, never queried
+  assert.doesNotThrow(() => encode(p, 0x010c, 9, [1, 1]));
   assert.doesNotThrow(() => encode(p, 0x0406, 9, [3]));
   assert.throws(() => encode(p, 0x0403, 9, [6, 2]));
 });

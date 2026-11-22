@@ -124,8 +124,7 @@ public final class BudsSession {
       device = target
       watcher.watchDisconnect(of: target)
       framer = Framer()
-      profile = .probe
-      unsupported = nil
+      resetDeviceState()
       caps = try decodeCapabilities(try await query(0x0100))
       let model = try decodeModel(try await query(0x0103))
       guard let known = ModelProfile.profile(for: model) else {
@@ -189,7 +188,38 @@ public final class BudsSession {
     batteryTimer?.cancel()
     failPending()
     device = nil
+    resetDeviceState()
     connection = .unavailable(reason)
+  }
+
+  /// Clears everything learned from the last pair, so switching models in one app session
+  /// (Buds 4, then Buds 3 or an unknown id) never shows the previous pair's values.
+  private func resetDeviceState() {
+    profile = .probe
+    unsupported = nil
+    caps = nil
+    battery = [:]
+    wearing = [:]
+    firmware = nil
+    noise = nil
+    smartLevel = nil
+    eq = nil
+    customPresets = []
+    holdCycle = nil
+    gestures = []
+    features = [:]
+    devices = nil
+    codec = nil
+    bass = nil
+    promptVolume = nil
+    golden = nil
+    fit = nil
+    hearingNote = nil
+    subscribed = []
+    updatedAt = nil
+    status = [:]
+    statusTimers.values.forEach { $0.cancel() }
+    statusTimers = [:]
   }
 
   private func failPending() {
@@ -404,7 +434,9 @@ public final class BudsSession {
       try await write("Noise control", 0x0404, noisePayload(mode)) {
         let state = try decodeNoise(try await query(0x010C, [1, 1]))
         noise = state
-        if mode == .smart || mode == .anc { smartLevel = try? decodeSmartLevel(try await query(0x010C, [4, 1])) }
+        if mode == .smart || mode == .anc, profile.allows(0x010C, [4, 1]) {
+          smartLevel = try? decodeSmartLevel(try await query(0x010C, [4, 1]))
+        }
         return mode.reports.contains(state.raw)
       }
     }

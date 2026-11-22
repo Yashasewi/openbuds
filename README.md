@@ -101,7 +101,7 @@ Then open [localhost:5173](http://localhost:5173/) in Chrome. Use `localhost`, n
 | Earbuds | Status | Tested firmware |
 |---|---|---|
 | OnePlus Buds 4 (`065414`) | Supported | 138.138.105 |
-| OnePlus Buds 3 (`063C14`) | **Experimental**: noise control (no Adaptive), 4 EQ presets (names not confirmed), game mode and wear detection, touch gestures, battery and wear. No hold cycle, custom EQ or tools. Dual connection is shown but can't be changed here | 127.127.101 |
+| OnePlus Buds 3 (`063C14`) | **Experimental**: noise control (no Adaptive), 4 EQ presets (Balanced, Serenade, Bass, Bold), game mode and wear detection, touch gestures, battery and wear. No hold cycle, custom EQ or tools. Dual connection is shown but can't be changed here | 127.127.101 |
 | Anything else | Read-only: OpenBuds shows the model and firmware and a **Copy diagnostics** button. It only reads identity, firmware, offered events and feature states, and answers the earbuds' time request (`0x0500`). It never sends a setting change | |
 
 Buds 3 support rests on one owner capture over RFCOMM (the web app's route). The Mac app reaches the earbuds over GATT, which has not been exchanged with a Buds 3 yet, so it may not connect. See [PROTOCOL.md](PROTOCOL.md#per-model-differences). If you own a Buds 3 or another model, a report from the Copy diagnostics button helps.
@@ -130,7 +130,7 @@ Bug reports and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.m
 - [Pods-Protocol](https://github.com/Star-ZER0/Pods-Protocol-Reverse-Engineering), CC-BY-SA-4.0. A format reference.
 - [Geologica](https://fonts.google.com/specimen/Geologica), through `@fontsource-variable/geologica`.
 
-Protocol details in [PROTOCOL.md](PROTOCOL.md) come from QuickBuds' published captures and probes of the author's own earbuds, with the source named for each fact. Items not yet confirmed are marked TODO.
+Protocol details in [PROTOCOL.md](PROTOCOL.md) come from QuickBuds' published captures, probes of the author's own earbuds, and a contributor's RFCOMM capture of their own OnePlus Buds 3 (2026-10-12), checked against the Buds 3 references above, with the source named for each fact. Items not yet confirmed are marked TODO.
 
 ## License
 
@@ -138,6 +138,6 @@ Protocol details in [PROTOCOL.md](PROTOCOL.md) come from QuickBuds' published ca
 
 ## Disclaimer
 
-OpenBuds is an independent, community project. It is not affiliated with, endorsed by, sponsored by, or supported by OnePlus, OPPO, realme, HeyTap or any of their affiliates. OnePlus, OnePlus Buds, OPPO, realme and HeyMelody are trademarks of their respective owners. They're used here only to say which devices OpenBuds is compatible with. OpenBuds includes no firmware, logos, images or other assets from OnePlus, OPPO or HeyMelody. Protocol details come from QuickBuds' published captures and probes of the author's own earbuds. Items not yet confirmed are marked TODO.
+OpenBuds is an independent, community project. It is not affiliated with, endorsed by, sponsored by, or supported by OnePlus, OPPO, realme, HeyTap or any of their affiliates. OnePlus, OnePlus Buds, OPPO, realme and HeyMelody are trademarks of their respective owners. They're used here only to say which devices OpenBuds is compatible with. OpenBuds includes no firmware, logos, images or other assets from OnePlus, OPPO or HeyMelody. Protocol details come from QuickBuds' published captures, probes of the author's own earbuds, and a contributor's capture of their own OnePlus Buds 3. Items not yet confirmed are marked TODO.
 
 Use it at your own risk. It comes with no warranty and may stop working after a firmware or app update. Changing settings with unofficial tools may affect your warranty or support, so check your warranty terms. Please don't contact OnePlus or OPPO support about OpenBuds. Open an issue here instead.

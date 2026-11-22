@@ -94,19 +94,22 @@ struct SoundPage: View {
         }
         .padding(.horizontal, 10)
       }
-      PanelSection(title: "Enhancements") {
-        SwitchRow(session: session, item: .bassWave, description: "Extra bass from the dynamic driver.")
-        if session.isOn(.bassWave) == true, session.bass != nil {
-          StepSlider(title: "Bass strength", range: -5...5, value: session.bass, format: signedText,
-            commit: { level in Task { await session.setBass(level) } }, disabled: session.busy)
-          StatusLine(session: session, key: "bass")
+      // None of these exist on Buds 3; skip the section rather than show an empty box.
+      if [Switch.bassWave, .goldenSound, .spatial, .hiRes].contains(where: { session.isOn($0) != nil }) {
+        PanelSection(title: "Enhancements") {
+          SwitchRow(session: session, item: .bassWave, description: "Extra bass from the dynamic driver.")
+          if session.isOn(.bassWave) == true, session.bass != nil {
+            StepSlider(title: "Bass strength", range: -5...5, value: session.bass, format: signedText,
+              commit: { level in Task { await session.setBass(level) } }, disabled: session.busy)
+            StatusLine(session: session, key: "bass")
+          }
+          SwitchRow(session: session, item: .goldenSound,
+            description: session.golden.map { "Your profile from \($0.name)." } ?? "Take the hearing test in Tools first.")
+          SwitchRow(session: session, item: .spatial, description: "Spatial audio.")
+          SwitchRow(session: session, item: .hiRes,
+            unavailable: session.hiResAvailable ? nil
+              : "Needs LHDC. This Mac uses \(session.codec.flatMap { codecNames[$0] } ?? "another codec").")
         }
-        SwitchRow(session: session, item: .goldenSound,
-          description: session.golden.map { "Your profile from \($0.name)." } ?? "Take the hearing test in Tools first.")
-        SwitchRow(session: session, item: .spatial, description: "Spatial audio.")
-        SwitchRow(session: session, item: .hiRes,
-          unavailable: session.hiResAvailable ? nil
-            : "Needs LHDC. This Mac uses \(session.codec.flatMap { codecNames[$0] } ?? "another codec").")
       }
     }
   }

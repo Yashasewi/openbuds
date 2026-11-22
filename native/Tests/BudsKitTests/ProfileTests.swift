@@ -56,7 +56,8 @@ struct ProfileTests {
     #expect(p.allows(0x0404, noisePayload(.smart)))
     #expect(p.allows(0x0403, [6, 1]))
     #expect(p.allows(0x0403, [4, 0]))
-    #expect(p.allows(0x010C, [4, 1]))
+    #expect(!p.allows(0x010C, [4, 1]))  // smart level was only seen as a push, never queried
+    #expect(p.allows(0x010C, [1, 1]))
     #expect(p.allows(0x0406, [3]))
     #expect(throws: (any Error).self) { try encode(0x0403, 9, [17, 0], for: p) }
   }

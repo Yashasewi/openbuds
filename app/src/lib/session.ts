@@ -318,8 +318,12 @@ export class BudsSession {
   }
   // Replies only from the identity allow-list (PROBE_PROFILE); a failed read just leaves a gap.
   private async diagnose(model: string) {
+    const generation = this.generation;
+    // A disconnect (or a newer connection) mid-diagnosis must not write into the next session's state.
+    const current = () => this.connected && generation === this.generation;
     const info: UnsupportedInfo = { productId: model, bitmap: this.caps?.bitmap ?? [] };
     const ask = async (command: number, payload: Bytes = []) => {
+      if (!current()) return undefined;
       try {
         return await this.query(command, payload);
       } catch (error) {
@@ -335,6 +339,7 @@ export class BudsSession {
     }
     info.offeredEvents = (await ask(0x0200))?.slice(2);
     info.features = await ask(0x010d, this.featurePayload);
+    if (!current()) return;
     this.setState({
       firmware: info.firmware,
       unsupported: { ...info, report: diagnosticsReport(info) },
@@ -374,6 +379,7 @@ export class BudsSession {
       }
       this.log("disconnected", { reason });
       this.queue = Promise.resolve();
+      this.writeChain = Promise.resolve();
     })();
     try {
       await this.closing;
@@ -581,6 +587,8 @@ export class BudsSession {
   }
   async refresh() {
     if (!this.connected) throw Error("Connect first");
+    // An unsupported model is read once by diagnose(); re-reading would leave its report stale.
+    if (!this.state.profile) return;
     this.lastRefresh = Date.now();
     for (const field of REFRESH) await this.read(field);
   }

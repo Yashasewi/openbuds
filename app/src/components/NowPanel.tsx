@@ -54,20 +54,25 @@ export function NowPanel() {
     }
   }
 
+  const readOnly = connected && !!state.unsupported;
   const headline = !connected
     ? connection === "restarting"
       ? "Restarting"
       : "Not connected"
-    : (GROUPS.find((g) => g.value === group)?.label ?? state.noise?.name ?? "Reading…");
+    : readOnly
+      ? "Read-only"
+      : (GROUPS.find((g) => g.value === group)?.label ?? state.noise?.name ?? "Reading…");
   const detail = !connected
     ? null
-    : group !== "anc"
-      ? null
-      : mode === "smart"
-        ? `Smart strength${state.smartLevel && LEVEL_NAMES[state.smartLevel] ? `, at ${LEVEL_NAMES[state.smartLevel]!.toLowerCase()} right now` : ", follows your surroundings"}`
-        : mode === "anc"
-          ? "Choose a strength below"
-          : `${LEVEL_NAMES[mode!]} strength`;
+    : readOnly
+      ? "This model isn’t supported yet, so nothing is changed."
+      : group !== "anc"
+        ? null
+        : mode === "smart"
+          ? `Smart strength${state.smartLevel && LEVEL_NAMES[state.smartLevel] ? `, at ${LEVEL_NAMES[state.smartLevel]!.toLowerCase()} right now` : ", follows your surroundings"}`
+          : mode === "anc"
+            ? "Choose a strength below"
+            : `${LEVEL_NAMES[mode!]} strength`;
 
   return (
     <div className="flex flex-col gap-7">
@@ -155,13 +160,15 @@ export function NowPanel() {
         </div>
       )}
 
-      <Battery />
+      {!state.unsupported && <Battery />}
 
       {connected && (
         <div className="flex gap-2">
-          <Button disabled={busy} onClick={() => run("refresh", () => session.refresh())}>
-            Read again
-          </Button>
+          {!readOnly && (
+            <Button disabled={busy} onClick={() => run("refresh", () => session.refresh())}>
+              Read again
+            </Button>
+          )}
           <Button onClick={disconnect}>Disconnect</Button>
         </div>
       )}

@@ -304,13 +304,15 @@ const BUDS3 = makeProfile(
     switchesReadable: [SWITCHES.gameMode, SWITCHES.wearDetection, SWITCHES.dualConnection],
     switchesWritable: [SWITCHES.gameMode, SWITCHES.wearDetection],
     featureQuery: [6, 4, 17],
-    // 0x0406 ids 0..3 were each acknowledged and read back through 0x010F. The preset names are not
-    // taken from any vendor app, so these labels are neutral. TODO: owner to confirm names from the phone app.
-    eqPresets: [0, 1, 2, 3].map((id) => ({
-      id,
-      label: `Preset ${id + 1}`,
-      note: "Name not confirmed",
-    })),
+    // 0x0406 ids 0..3 were each acknowledged and read back through 0x010F. Names are in the order the
+    // owner's phone app lists its presets (screenshot, 2026-11-22); the id-to-name match follows that order
+    // and was not read back separately. Not taken from any vendor app's files.
+    eqPresets: [
+      { id: 0, label: "Balanced", note: "Default" },
+      { id: 1, label: "Serenade" },
+      { id: 2, label: "Bass" },
+      { id: 3, label: "Bold" },
+    ],
     // Custom EQ (0x0122, 0x0418) was never captured.
     customEq: false,
     // Same menus as Buds 4 without function 17 (game mode), which the capture did not show on this model.
@@ -328,8 +330,9 @@ const BUDS3 = makeProfile(
       0x0100, 0x0103, 0x0105, 0x0106, 0x0108, 0x010c, 0x010d, 0x010f, 0x0200, 0x0205, 0x0401,
       0x0403, 0x0404, 0x0406, 0x8500,
     ],
-    // 1 noise (captured). 4 Smart level: only seen as a push (0204 03 04 01), never queried; read-only.
-    noiseReads: [1, 4],
+    // 1 noise (captured). Smart level (4) was only seen as a push (0204 03 04 01), never queried,
+    // so it is not read: smartLevel still updates from pushes, like wear (0x0109).
+    noiseReads: [1],
     featureReadIds: [6, 4, 17],
     eqMaxId: 3,
   },
