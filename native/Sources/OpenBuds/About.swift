@@ -139,7 +139,7 @@ struct AboutPage: View {
           .font(.caption)
           .foregroundStyle(.secondary)
           .textSelection(.enabled)
-        Text("Free, open-source controls for OnePlus Buds 4.")
+        Text("Free, open-source controls for OnePlus Buds.")
           .font(.caption)
           .foregroundStyle(.secondary)
           .multilineTextAlignment(.center)

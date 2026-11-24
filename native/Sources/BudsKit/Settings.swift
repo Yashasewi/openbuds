@@ -5,7 +5,7 @@ import Foundation
 
 public enum Switch: UInt8, CaseIterable, Sendable {
   case wearDetection = 4, gameMode = 6, goldenSound = 11, dualConnection = 17, hiRes = 24, spatial = 27, smartVolume = 28, bassWave = 29
-  static let allIDs = Set(allCases.map(\.rawValue))
+  public static let allIDs = Set(allCases.map(\.rawValue))
   public var title: String {
     switch self {
     case .wearDetection: "Wear detection"
@@ -19,9 +19,6 @@ public enum Switch: UInt8, CaseIterable, Sendable {
     }
   }
 }
-// The ids this firmware's 0x010D reply answers for.
-let featureQuery: Bytes = [9, 5, 4, 11, 17, 24, 6, 27, 29, 28]
-
 func decodeFeatures(_ p: Bytes) throws -> [UInt8: UInt8] {
   try requireSuccess(p, 2)
   guard p.count == 2 + Int(p[1]) * 2 else { throw BudsError.unrecognized("feature count") }
@@ -46,11 +43,9 @@ public enum HoldMode: Int, CaseIterable, Sendable {
     }
   }
 }
-private let holdMask = HoldMode.allCases.reduce(0) { $0 | 1 << $1.rawValue }
-
 func holdCyclePayload(_ modes: Set<HoldMode>) -> Bytes { [2, 1] + minimalLE(holdCycleMask(modes)) }
 func holdCycleMask(_ modes: Set<HoldMode>) -> Int { modes.reduce(0) { $0 | 1 << $1.rawValue } }
-func validHoldCycle(_ p: Bytes) -> Bool {
+func validHoldCycle(_ p: Bytes, mask holdMask: Int) -> Bool {
   guard p.count >= 3, p.count <= 6, p[0] == 2, p[1] == 1 else { return false }
   let mask = le(p[2...])
   return mask > 0 && mask & ~holdMask == 0 && Array(p[2...]) == minimalLE(mask)
@@ -83,11 +78,8 @@ public enum Gestures {
     8: "Cycle noise modes", 10: "Change track", 11: "Volume up", 12: "Volume down", 13: "Switch devices", 17: "Game mode",
     28: "Decline call", 29: "Answer or end call",
   ]
-  // Buds 4 gesture and call menus, mapped to measured function bytes. Call menus: QuickBuds captures (docs/PROTOCOL.md:1009). Gesture lists: no independent source; QuickBuds' Buds 4 menu entry (line 1013) is a comparison with the vendor app, not a capture. TODO: re-verify each list with a capture.
-  public static let menus: [UInt8: [UInt8]] = [1: [0, 1], 2: [0, 1, 5, 6, 3, 17], 3: [0, 5, 6, 3, 17], 5: [0, 7, 10], 4: [0, 8]]
-  public static let callMenus: [UInt8: [UInt8]] = [2: [0, 29], 6: [0, 28]]
+  // The gesture and call menus belong to the model: ModelProfile.gestureMenus and callMenus.
   public static let order: [UInt8] = [1, 2, 3, 5, 4]
-  static let known: Set<UInt8> = [0, 1, 3, 5, 6, 7, 8, 10, 11, 12, 17, 28, 29]
 }
 
 func decodeGestures(_ p: Bytes) throws -> [GestureSlot] {
@@ -99,7 +91,7 @@ func decodeGestures(_ p: Bytes) throws -> [GestureSlot] {
   }
 }
 
-func validGestureTable(_ p: Bytes) -> Bool {
+func validGestureTable(_ p: Bytes, known: Set<UInt8>) -> Bool {
   guard let n = p.first, (1...64).contains(n), p.count == 1 + Int(n) * 4 else { return false }
   for index in stride(from: 1, to: p.count, by: 4) {
     let device = p[index]
@@ -109,26 +101,31 @@ func validGestureTable(_ p: Bytes) -> Bool {
     let deviceOK = device == 1 || device == 2 || device == 4
     let buttonOK = (1...6).contains(button)
     let actionOK = (1...6).contains(action)
-    let functionOK = Gestures.known.contains(function)
+    let functionOK = known.contains(function)
     if !deviceOK || !buttonOK || !actionOK || !functionOK { return false }
   }
   return true
 }
 
 // Writes every slot the table has for (side, action) outside the call group; the table's shape varies between reads.
-func gestureTablePayload(_ table: [GestureSlot], ear: Ear, action: UInt8, function: UInt8) throws -> Bytes {
-  guard Gestures.menus[action]?.contains(function) == true else { throw BudsError.notOffered("That function") }
+func gestureTablePayload(_ profile: ModelProfile, _ table: [GestureSlot], ear: Ear, action: UInt8, function: UInt8) throws -> Bytes {
+  guard profile.gestureMenus[action]?.contains(function) == true else { throw BudsError.notOffered("That function") }
   var matched = false
   let entries = table.map { g -> Bytes in
     if g.device == ear.rawValue, g.action == action, g.button != 6 { matched = true; return [g.device, g.button, g.action, function] }
     return [g.device, g.button, g.action, g.function]
   }
   guard matched else { throw BudsError.notOffered("This gesture") }
+  if profile.gestureWrite == .slot {
+    // Only the changed slots, the form captured on Buds 3 (01 01 01 02 03).
+    let changed = entries.filter { $0[0] == ear.rawValue && $0[2] == action && $0[1] != 6 }
+    return [UInt8(changed.count)] + changed.flatMap { $0 }
+  }
   return [UInt8(entries.count)] + entries.flatMap { $0 }
 }
 
-func callGesturePayload(action: UInt8, function: UInt8) throws -> Bytes {
-  guard Gestures.callMenus[action]?.contains(function) == true else { throw BudsError.notOffered("That function") }
+func callGesturePayload(_ profile: ModelProfile, action: UInt8, function: UInt8) throws -> Bytes {
+  guard profile.callMenus[action]?.contains(function) == true else { throw BudsError.notOffered("That function") }
   return [1, 4, 6, action, function]
 }
 

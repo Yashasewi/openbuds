@@ -2,7 +2,7 @@ import CoreBluetooth
 import Foundation
 import IOBluetooth
 
-/// The Buds 4 control channel over GATT, attached to the classic connection macOS already has open
+/// The earbuds' control channel over GATT, attached to the classic connection macOS already has open
 /// (bluetoothd reports `transport: classic`). RFCOMM channel 15 stays free for the website.
 /// Same frames as RFCOMM: commands go to `0100079A`, replies and pushes arrive on `0200079A`.
 @MainActor
@@ -258,7 +258,7 @@ enum GATTError: LocalizedError {
   }
 }
 
-/// The Buds 4 control channel over classic Bluetooth RFCOMM (the same service Chrome reaches through Web Serial).
+/// The earbuds' control channel over classic Bluetooth RFCOMM (the same service Chrome reaches through Web Serial).
 /// macOS only opens RFCOMM channels for processes launched as an app bundle, not for bare terminal binaries.
 @MainActor
 final class RFCOMMLink: NSObject {
@@ -273,10 +273,18 @@ final class RFCOMMLink: NSObject {
     IOBluetoothSDPUUID(bytes: $0.baseAddress, length: 16)
   }
 
-  /// Paired devices that advertise (or, when not yet cached, are named like) the Buds control service.
+  /// Paired devices that advertise the control service (the 079A SDP record), whatever they are called. When the
+  /// record is not cached yet, fall back to the name: it must hold "OnePlus" and "Buds", anywhere, because owners
+  /// rename their buds ("Sam's OnePlus Buds 3") and Nord models say "OnePlus Nord Buds 3 Pro". Requiring "Buds"
+  /// keeps a paired OnePlus phone or watch out.
   static func candidates() -> [IOBluetoothDevice] {
     let paired = (IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice]) ?? []
-    return paired.filter { $0.getServiceRecord(for: uuid) != nil || ($0.name ?? "").contains("OnePlus Buds") }
+    return paired.filter { $0.getServiceRecord(for: uuid) != nil || nameLooksLikeBuds($0.name) }
+  }
+
+  nonisolated static func nameLooksLikeBuds(_ name: String?) -> Bool {
+    let name = name ?? ""
+    return name.localizedCaseInsensitiveContains("OnePlus") && name.localizedCaseInsensitiveContains("Buds")
   }
 
   func channelID(on device: IOBluetoothDevice) async -> BluetoothRFCOMMChannelID? {

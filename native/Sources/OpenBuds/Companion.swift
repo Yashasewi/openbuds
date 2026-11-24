@@ -166,7 +166,7 @@ struct ConnectCardView: View {
     VStack(spacing: 16) {
       HStack(spacing: 10) {
         VStack(alignment: .leading, spacing: 1) {
-          Text("OnePlus Buds 4").font(.headline)
+          Text(session.profile.isKnown ? session.profile.displayName : "OnePlus earbuds").font(.headline)
           Text("Connected").font(.callout).foregroundStyle(.secondary)
         }
         Spacer()
