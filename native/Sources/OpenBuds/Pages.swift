@@ -38,8 +38,10 @@ struct SwitchRow: View {
             message: prompt.message,
             actionTitle: prompt.action,
             destructive: true,
+            confirmDisabled: session.busy,
             cancel: { confirmingOff = false },
             confirm: {
+              guard !session.busy else { return }
               confirmingOff = false
               Task { await session.setSwitch(item, false) }
             }
@@ -59,6 +61,7 @@ struct InlineConfirmStrip: View {
   let message: String
   let actionTitle: String
   var destructive = false
+  var confirmDisabled = false
   let cancel: () -> Void
   let confirm: () -> Void
 
@@ -73,6 +76,7 @@ struct InlineConfirmStrip: View {
           .buttonStyle(PanelButtonStyle(variant: .secondary))
         Button(actionTitle, role: destructive ? .destructive : nil, action: confirm)
           .buttonStyle(PanelButtonStyle(variant: .prominent(destructive ? .red : .accentColor)))
+          .disabled(confirmDisabled)
       }
     }
     .padding(10)
@@ -370,7 +374,7 @@ struct SoundPage: View {
           item: .goldenSound,
           description: session.supports(0x040D)
             ? "No hearing profile yet."
-            : "Take the hearing test in Tools first."
+            : "These earbuds don’t offer a hearing test."
         )
         if session.supports(0x040D) {
           HStack {
@@ -420,6 +424,7 @@ struct PresetRow: View {
       }
       .buttonStyle(.plain)
       .disabled(session.busy)
+      .accessibilityValue(preset.isCustom ? gainSummary : "")
       if preset.isCustom {
         Button("Edit", systemImage: "slider.horizontal.3", action: edit)
           .labelStyle(.iconOnly)
@@ -431,6 +436,10 @@ struct PresetRow: View {
     .padding(.vertical, 8)
     .background(hovering ? AnyShapeStyle(.fill.tertiary) : AnyShapeStyle(.clear), in: .rect(cornerRadius: 12))
     .onHover { hovering = $0 }
+  }
+
+  private var gainSummary: String {
+    preset.bands.map { $0.gain > 0 ? "+\($0.gain)" : "\($0.gain)" }.joined(separator: ", ")
   }
 }
 
@@ -641,25 +650,24 @@ struct PresetPage: View {
   }
 
   private static func parseEQGains(_ text: String, count: Int) -> [Int]? {
-    func extract(_ slice: Substring) -> [Int] {
-      let pattern = #"[+-]?\d+"#
-      var numbers: [Int] = []
-      var index = slice.startIndex
-      while let match = slice[index...].range(of: pattern, options: .regularExpression) {
-        if let value = Int(slice[match]) { numbers.append(value) }
-        index = match.upperBound
-      }
-      return numbers
-    }
-    let parsed: [Int]
+    let candidate: Substring
     if let colon = text.lastIndex(of: ":") {
-      let after = extract(text[text.index(after: colon)...])
-      parsed = after.count == count ? after : extract(text[...])
+      candidate = text[text.index(after: colon)...]
     } else {
-      parsed = extract(text[...])
+      candidate = text[...]
     }
-    guard parsed.count == count else { return nil }
-    return parsed.map { max(-eqGain, min(eqGain, $0)) }
+    let separators = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ",;|"))
+    let tokens = candidate.components(separatedBy: separators).filter { !$0.isEmpty }
+    guard tokens.count == count else { return nil }
+    var values: [Int] = []
+    values.reserveCapacity(count)
+    for token in tokens {
+      guard token.range(of: #"^[+-]?\d+$"#, options: .regularExpression) != nil,
+        let value = Int(token)
+      else { return nil }
+      values.append(max(-eqGain, min(eqGain, value)))
+    }
+    return values
   }
 }
 
@@ -1263,6 +1271,7 @@ struct HearingPage: View {
   @State private var step = -1
   @State private var levels = Array(repeating: hearingStart, count: 12)
   @State private var starting = false
+  @State private var cancelledStart = false
   @State private var note: String?
   @State private var warned = false
   @State private var active = false
@@ -1283,6 +1292,7 @@ struct HearingPage: View {
       title: showingProfile ? "Your Golden Sound" : "Hearing test",
       model: model,
       onBack: {
+        if starting { cancelledStart = true }
         if active {
           Task { await end() }
         }
@@ -1346,7 +1356,7 @@ struct HearingPage: View {
       if step > 0 {
         Button("Back") { go(step - 1) }.buttonStyle(PanelButtonStyle(variant: .secondary))
       } else if retaking, session.golden != nil {
-        Button("Cancel") { retaking = false }.buttonStyle(PanelButtonStyle(variant: .secondary))
+        Button("Cancel") { cancelRetake() }.buttonStyle(PanelButtonStyle(variant: .secondary))
       }
       Spacer()
       Group {
@@ -1508,18 +1518,47 @@ struct HearingPage: View {
 
   private func start() {
     starting = true
+    cancelledStart = false
     Task {
       do {
         try await session.startHearingTest()
-        active = true
-        note = nil
-        step = 0
-        play(0)
+        if cancelledStart {
+          await session.endHearingTest()
+        } else {
+          active = true
+          note = nil
+          step = 0
+          play(0)
+        }
       } catch {
-        note = error.localizedDescription
+        if !cancelledStart {
+          note = error.localizedDescription
+        }
       }
       starting = false
     }
+  }
+
+  private func cancelRetake() {
+    if starting {
+      cancelledStart = true
+      step = -1
+      note = nil
+      retaking = false
+      return
+    }
+    if active {
+      Task {
+        await end()
+        step = -1
+        note = nil
+        retaking = false
+      }
+      return
+    }
+    step = -1
+    note = nil
+    retaking = false
   }
 
   private func go(_ next: Int) {

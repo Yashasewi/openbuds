@@ -33,7 +33,10 @@ final class OutputAudio {
 
   /// The output device for the earbuds the session is talking to, if CoreAudio has one.
   func buds(named name: String?) -> Device? {
-    outputs.first { $0.bluetooth && ($0.name == name || $0.name.localizedCaseInsensitiveContains("OnePlus Buds")) }
+    if let name, let exact = outputs.first(where: { $0.bluetooth && $0.name == name }) {
+      return exact
+    }
+    return outputs.first { $0.bluetooth && $0.name.localizedCaseInsensitiveContains("OnePlus Buds") }
   }
 
   func setVolume(_ value: Double) {

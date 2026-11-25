@@ -144,11 +144,13 @@ struct ProfileTests {
     #expect(session.connectionIssue == .none)
     #expect(session.connectionStep == .finding)
 
-    let snap = LastKnownBuds(name: "OnePlus Buds 4", left: 91, right: 88, chargingCase: 66, firmware: "112.112.100", seenAt: Date(timeIntervalSince1970: 1_700_000_000))
+    let snap = LastKnownBuds(productId: "065414", name: "OnePlus Buds 4", left: 91, right: 88, chargingCase: 66, firmware: "112.112.100", seenAt: Date(timeIntervalSince1970: 1_700_000_000))
     let encoded = try? JSONEncoder().encode(snap)
     let decoded = encoded.flatMap { try? JSONDecoder().decode(LastKnownBuds.self, from: $0) }
     #expect(decoded == snap)
     #expect(snap.hasBattery)
+    #expect(snap.matches(productId: "065414", name: "OnePlus Buds 4"))
+    #expect(!snap.matches(productId: "063c14", name: "OnePlus Buds 3"))
     #expect(snap.level(for: .left)?.percent == 91)
     #expect(snap.level(for: .right)?.percent == 88)
     #expect(snap.level(for: .chargingCase)?.percent == 66)

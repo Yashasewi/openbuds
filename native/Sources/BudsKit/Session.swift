@@ -1,3 +1,4 @@
+import CoreBluetooth
 import Foundation
 import IOBluetooth
 import Observation
@@ -18,6 +19,7 @@ public enum ConnectionStep: Int, Equatable, Sendable {
 
 /// Local snapshot of the last connected pair so the standby panel keeps the user's earbuds and last battery visible.
 public struct LastKnownBuds: Codable, Equatable, Sendable {
+  public let productId: String?
   public let name: String
   public let left: Int?
   public let right: Int?
@@ -25,13 +27,19 @@ public struct LastKnownBuds: Codable, Equatable, Sendable {
   public let firmware: String?
   public let seenAt: Date
 
-  public init(name: String, left: Int?, right: Int?, chargingCase: Int?, firmware: String?, seenAt: Date) {
+  public init(productId: String? = nil, name: String, left: Int?, right: Int?, chargingCase: Int?, firmware: String?, seenAt: Date) {
+    self.productId = productId
     self.name = name
     self.left = left
     self.right = right
     self.chargingCase = chargingCase
     self.firmware = firmware
     self.seenAt = seenAt
+  }
+
+  public func matches(productId: String, name: String) -> Bool {
+    if let storedId = self.productId { return storedId == productId }
+    return self.name == name
   }
 
   public func level(for part: Part) -> BatteryLevel? {
@@ -166,12 +174,14 @@ public final class BudsSession {
 
   private func recordLastKnown() {
     guard isConnected, unsupported == nil, profile.isKnown else { return }
+    let previous = lastKnown.flatMap { $0.matches(productId: profile.productId, name: profile.displayName) ? $0 : nil }
     let snapshot = LastKnownBuds(
+      productId: profile.productId,
       name: profile.displayName,
-      left: battery[.left]?.percent ?? lastKnown?.left,
-      right: battery[.right]?.percent ?? lastKnown?.right,
-      chargingCase: battery[.chargingCase]?.percent ?? lastKnown?.chargingCase,
-      firmware: firmware ?? lastKnown?.firmware,
+      left: battery[.left]?.percent ?? previous?.left,
+      right: battery[.right]?.percent ?? previous?.right,
+      chargingCase: battery[.chargingCase]?.percent ?? previous?.chargingCase,
+      firmware: firmware ?? previous?.firmware,
       seenAt: Date()
     )
     lastKnown = snapshot
@@ -206,6 +216,21 @@ public final class BudsSession {
     return .generic
   }
 
+  private static func currentBluetoothIssue() -> (issue: ConnectionIssue, message: String)? {
+    switch CBManager.authorization {
+    case .denied, .restricted:
+      return (.bluetoothUnauthorized, GATTError.unauthorized.localizedDescription)
+    default:
+      break
+    }
+    if let controller = IOBluetoothHostController.default(),
+       controller.powerState == kBluetoothHCIPowerStateOFF
+    {
+      return (.bluetoothOff, GATTError.poweredOff.localizedDescription)
+    }
+    return nil
+  }
+
   /// A retry keeps the last error on screen instead of flashing "Connecting" every few seconds.
   private func attempt(retrying: Bool) async {
     guard !isConnected, !connecting, !userDisconnected else { return }
@@ -214,9 +239,14 @@ public final class BudsSession {
     connectionStep = .finding
     if !retrying { connectionIssue = .none }
     guard let target = RFCOMMLink.candidates().first(where: { $0.isConnected() }) else {
-      connectionIssue = .none
       connectionStep = .finding
-      connection = .unavailable("Connect your OnePlus earbuds to this Mac in Bluetooth settings.")
+      if let radio = Self.currentBluetoothIssue() {
+        connectionIssue = radio.issue
+        connection = .unavailable(radio.message)
+      } else {
+        connectionIssue = .none
+        connection = .unavailable("Connect your OnePlus earbuds to this Mac in Bluetooth settings.")
+      }
       return
     }
     connecting = true
