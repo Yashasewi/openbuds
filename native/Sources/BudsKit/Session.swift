@@ -2,6 +2,52 @@ import Foundation
 import IOBluetooth
 import Observation
 
+public enum ConnectionIssue: Equatable, Sendable {
+  case none
+  case bluetoothUnauthorized
+  case bluetoothOff
+  case retrying
+  case generic
+}
+
+public enum ConnectionStep: Int, Equatable, Sendable {
+  case finding = 1
+  case linking = 2
+  case reading = 3
+}
+
+/// Local snapshot of the last connected pair so the standby panel keeps the user's earbuds and last battery visible.
+public struct LastKnownBuds: Codable, Equatable, Sendable {
+  public let name: String
+  public let left: Int?
+  public let right: Int?
+  public let chargingCase: Int?
+  public let firmware: String?
+  public let seenAt: Date
+
+  public init(name: String, left: Int?, right: Int?, chargingCase: Int?, firmware: String?, seenAt: Date) {
+    self.name = name
+    self.left = left
+    self.right = right
+    self.chargingCase = chargingCase
+    self.firmware = firmware
+    self.seenAt = seenAt
+  }
+
+  public func level(for part: Part) -> BatteryLevel? {
+    let pct: Int? = switch part {
+    case .left: left
+    case .right: right
+    case .chargingCase: chargingCase
+    }
+    return pct.map { BatteryLevel(percent: $0, charging: false) }
+  }
+
+  public var hasBattery: Bool {
+    left != nil || right != nil || chargingCase != nil
+  }
+}
+
 /// Swift port of app/src/lib/session.ts: one request at a time, replies matched by sequence,
 /// live pushes applied to state, and every change verified by reading it back.
 @MainActor
@@ -15,6 +61,12 @@ public final class BudsSession {
   }
 
   public private(set) var connection: Connection = .searching
+  public private(set) var connectionIssue: ConnectionIssue = .none
+  public private(set) var connectionStep: ConnectionStep = .finding
+  public private(set) var pausedByUser = false
+  public private(set) var pairedName: String?
+  public private(set) var pairedAudioConnected = false
+  public private(set) var lastKnown: LastKnownBuds?
   /// The allow-list in force: identity reads only until the product id has a profile (`ModelProfile.probe`).
   public private(set) var profile: ModelProfile = .probe
   /// Set for a product id with no profile; the session is then read-only.
@@ -75,24 +127,57 @@ public final class BudsSession {
   @ObservationIgnored private var fitWaiter: CheckedContinuation<FitResult, Error>?
   @ObservationIgnored private var statusTimers: [String: DispatchWorkItem] = [:]
 
+  private static let lastKnownKey = "openbuds.lastKnownBuds"
+
   public init() {
+    if let data = UserDefaults.standard.data(forKey: Self.lastKnownKey),
+       let saved = try? JSONDecoder().decode(LastKnownBuds.self, from: data)
+    {
+      lastKnown = saved
+    }
     link.onData = { [weak self] bytes in self?.received(bytes) }
     link.onClose = { [weak self] in self?.closed(reason: "They reconnect by themselves when you take them out of the case.") }
     watcher.onConnect = { [weak self] device in
       guard let self, RFCOMMLink.candidates().contains(where: { $0.addressString == device.addressString }) else { return }
+      self.refreshPairedState()
       // Give the buds a moment to bring up their services after the baseband connects.
       DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { MainActor.assumeIsolated { self.autoConnect() } }
     }
     watcher.onDisconnect = { [weak self] _ in
       self?.retryTimer?.cancel()
       self?.link.close()
+      self?.refreshPairedState()
       self?.closed(reason: "They reconnect by themselves when you take them out of the case.")
     }
   }
 
   public func start() {
+    refreshPairedState()
     watcher.start()
     autoConnect()
+  }
+
+  private func refreshPairedState() {
+    let candidates = RFCOMMLink.candidates()
+    let connected = candidates.first(where: { $0.isConnected() })
+    pairedName = connected?.name ?? candidates.first?.name
+    pairedAudioConnected = connected != nil
+  }
+
+  private func recordLastKnown() {
+    guard isConnected, unsupported == nil, profile.isKnown else { return }
+    let snapshot = LastKnownBuds(
+      name: profile.displayName,
+      left: battery[.left]?.percent ?? lastKnown?.left,
+      right: battery[.right]?.percent ?? lastKnown?.right,
+      chargingCase: battery[.chargingCase]?.percent ?? lastKnown?.chargingCase,
+      firmware: firmware ?? lastKnown?.firmware,
+      seenAt: Date()
+    )
+    lastKnown = snapshot
+    if let data = try? JSONEncoder().encode(snapshot) {
+      UserDefaults.standard.set(data, forKey: Self.lastKnownKey)
+    }
   }
 
   private func autoConnect() {
@@ -100,16 +185,37 @@ public final class BudsSession {
     Task { await connect() }
   }
 
+  public func clearError() {
+    lastError = nil
+  }
+
   public func connect() async {
     userDisconnected = false
+    pausedByUser = false
     await attempt(retrying: false)
+  }
+
+  nonisolated static func issue(for error: Error) -> ConnectionIssue {
+    if let gatt = error as? GATTError {
+      switch gatt {
+      case .unauthorized: return .bluetoothUnauthorized
+      case .poweredOff: return .bluetoothOff
+      default: return gatt.retries ? .retrying : .generic
+      }
+    }
+    return .generic
   }
 
   /// A retry keeps the last error on screen instead of flashing "Connecting" every few seconds.
   private func attempt(retrying: Bool) async {
     guard !isConnected, !connecting, !userDisconnected else { return }
     retryTimer?.cancel()
+    refreshPairedState()
+    connectionStep = .finding
+    if !retrying { connectionIssue = .none }
     guard let target = RFCOMMLink.candidates().first(where: { $0.isConnected() }) else {
+      connectionIssue = .none
+      connectionStep = .finding
       connection = .unavailable("Connect your OnePlus earbuds to this Mac in Bluetooth settings.")
       return
     }
@@ -120,7 +226,9 @@ public final class BudsSession {
     lastError = nil
     do {
       // GATT, not RFCOMM: channel 15 allows one program per Mac, and the website uses it.
+      connectionStep = .linking
       try await link.connect(named: target.name)
+      connectionStep = .reading
       device = target
       watcher.watchDisconnect(of: target)
       framer = Framer()
@@ -132,16 +240,20 @@ public final class BudsSession {
         // A disconnect during the reads goes to the catch below instead of showing Connected.
         try await diagnose(model: model, bitmap: caps?.bitmap ?? [])
         guard device != nil else { throw BudsError.disconnected }
+        connectionIssue = .none
         connection = .connected(name)
         return
       }
       profile = known
+      connectionIssue = .none
       connection = .connected(name)
       await refresh()
       try? await subscribeEvents()
     } catch {
       link.close()
       failPending()
+      guard !userDisconnected else { return }
+      connectionIssue = Self.issue(for: error)
       connection = .unavailable(error.localizedDescription)
       // Right after the buds connect, their GATT service can lag behind the audio link,
       // and nothing else would prompt another attempt.
@@ -166,6 +278,7 @@ public final class BudsSession {
 
   private func scheduleRetry() {
     retryTimer?.cancel()
+    connectionIssue = .retrying
     let work = DispatchWorkItem { [weak self] in
       MainActor.assumeIsolated {
         guard let self else { return }
@@ -177,18 +290,26 @@ public final class BudsSession {
   }
 
   public func disconnect() {
+    recordLastKnown()
     userDisconnected = true
+    pausedByUser = true
     retryTimer?.cancel()
     link.close()
+    refreshPairedState()
+    connectionIssue = .none
+    connectionStep = .finding
     closed(reason: "You disconnected them. Click Connect to reconnect.")
   }
 
   private func closed(reason: String) {
     guard isConnected || connecting else { return }
+    recordLastKnown()
     batteryTimer?.cancel()
     failPending()
     device = nil
     resetDeviceState()
+    connectionIssue = .none
+    connectionStep = .finding
     connection = .unavailable(reason)
   }
 
@@ -286,6 +407,7 @@ public final class BudsSession {
     if supports(0x0130), let v = try? decodeByte(try await query(0x0130)) { promptVolume = v }
     if supports(0x0115), let p = try? await query(0x0115) { golden = decodeGolden(p) }
     updatedAt = Date()
+    recordLastKnown()
   }
 
   private func subscribeEvents() async throws {
@@ -324,7 +446,10 @@ public final class BudsSession {
     guard profile.isKnown else { return }
     switch frame.command {
     case 0x0204 where p.first == 1:
-      if let b = decodeBattery(Array(p.dropFirst()), status: false) { battery.merge(b) { $1 } }
+      if let b = decodeBattery(Array(p.dropFirst()), status: false) {
+        battery.merge(b) { $1 }
+        recordLastKnown()
+      }
     case 0x0204 where p.first == 2:
       guard let w = decodeWearing(Array(p.dropFirst())) else { return }
       let wasVisible = caseVisible(wearing)
@@ -363,7 +488,10 @@ public final class BudsSession {
       MainActor.assumeIsolated {
         guard let self, self.isConnected else { return }
         Task {
-          if let p = try? await self.query(0x0106), let b = decodeBattery(p, status: true) { self.battery = b }
+          if let p = try? await self.query(0x0106), let b = decodeBattery(p, status: true) {
+            self.battery = b
+            self.recordLastKnown()
+          }
         }
       }
     }

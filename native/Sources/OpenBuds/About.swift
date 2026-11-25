@@ -1,4 +1,5 @@
 import AppKit
+import BudsKit
 import Observation
 import SwiftUI
 
@@ -124,6 +125,7 @@ final class UpdateChecker {
 }
 
 struct AboutPage: View {
+  let session: BudsSession
   let model: PanelModel
 
   var body: some View {
@@ -131,7 +133,7 @@ struct AboutPage: View {
       VStack(spacing: 6) {
         Image(nsImage: NSApp.applicationIconImage)
           .resizable()
-          .frame(width: 64, height: 64)
+          .frame(width: 52, height: 52)
         Text("OpenBuds").font(.title3.weight(.semibold))
         Text(AppInfo.isBeta
           ? "Version \(AppInfo.version) (\(AppInfo.build)) Beta"
@@ -146,6 +148,18 @@ struct AboutPage: View {
       }
       .frame(maxWidth: .infinity)
       .padding(.vertical, 6)
+
+      if session.isConnected {
+        PanelSection(title: "Connected earbuds") {
+          infoRow("Model", value: session.profile.isKnown
+            ? session.profile.displayName
+            : "Unsupported (\(session.unsupported?.productId ?? "unknown"))")
+          Divider()
+          infoRow("Firmware", value: session.firmware ?? "–", selectable: session.firmware != nil)
+          Divider()
+          infoRow("Audio codec", value: session.codec.flatMap { codecNames[$0] } ?? "–")
+        }
+      }
 
       PanelSection { update.padding(.vertical, 9) }
 
@@ -176,6 +190,20 @@ struct AboutPage: View {
     .task { await model.updates.check() }
   }
 
+  private func infoRow(_ label: String, value: String, selectable: Bool = false) -> some View {
+    HStack {
+      Text(label).foregroundStyle(.secondary)
+      Spacer(minLength: 8)
+      if selectable {
+        Text(value).monospacedDigit().textSelection(.enabled)
+      } else {
+        Text(value).lineLimit(1)
+      }
+    }
+    .font(.caption)
+    .padding(.vertical, 7)
+  }
+
   @ViewBuilder private var update: some View {
     HStack(spacing: 10) {
       switch model.updates.state {
@@ -200,8 +228,7 @@ struct AboutPage: View {
         }
         Spacer(minLength: 8)
         Button("Download") { NSWorkspace.shared.open(offer.download) }
-          .buttonStyle(.glassProminent)
-          .controlSize(.small)
+          .buttonStyle(PanelButtonStyle(variant: .prominent()))
       case .failed:
         IconBadge(icon: "wifi.exclamationmark", color: .gray)
         VStack(alignment: .leading, spacing: 1) {
@@ -210,8 +237,7 @@ struct AboutPage: View {
         }
         Spacer(minLength: 8)
         Button("Retry") { Task { await model.updates.check() } }
-          .buttonStyle(.glass)
-          .controlSize(.small)
+          .buttonStyle(PanelButtonStyle(variant: .secondary))
       }
     }
     .animation(.smooth, value: model.updates.state)

@@ -220,6 +220,11 @@ public enum Part: Int, CaseIterable, Sendable {
 public struct BatteryLevel: Equatable, Sendable {
   public let percent: Int?
   public let charging: Bool
+
+  public init(percent: Int?, charging: Bool = false) {
+    self.percent = percent
+    self.charging = charging
+  }
 }
 
 public struct WearState: Equatable, Sendable {

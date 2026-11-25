@@ -42,7 +42,12 @@ final class GATTLink: NSObject {
     close()
     let central = self.central ?? CBCentralManager(delegate: self, queue: .main)
     self.central = central
-    if central.state != .poweredOn { try await wait(for: .power, timeout: 5) {} }
+    switch central.state {
+    case .poweredOn: break
+    case .unauthorized: throw GATTError.unauthorized
+    case .poweredOff, .unsupported: throw GATTError.poweredOff
+    default: try await wait(for: .power, timeout: 5) {}
+    }
     let found = central.retrieveConnectedPeripherals(withServices: Self.systemServices)
     guard !found.isEmpty else { throw GATTError.notFound }
     // CoreBluetooth does not expose the Bluetooth address, so only an unambiguous match is safe:

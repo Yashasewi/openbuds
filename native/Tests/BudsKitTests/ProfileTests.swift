@@ -119,6 +119,41 @@ struct ProfileTests {
     #expect(!RFCOMMLink.nameLooksLikeBuds(nil))
   }
 
+  @Test @MainActor func connectionDiagnosticsDefaultsAndMapping() {
+    let session = BudsSession()
+    #expect(session.connection == .searching)
+    #expect(session.connectionIssue == .none)
+    #expect(session.connectionStep == .finding)
+    #expect(ConnectionStep.finding.rawValue == 1)
+    #expect(ConnectionStep.linking.rawValue == 2)
+    #expect(ConnectionStep.reading.rawValue == 3)
+    #expect(BudsSession.issue(for: GATTError.unauthorized) == .bluetoothUnauthorized)
+    #expect(BudsSession.issue(for: GATTError.poweredOff) == .bluetoothOff)
+    #expect(BudsSession.issue(for: GATTError.notFound) == .retrying)
+    #expect(BudsSession.issue(for: GATTError.connectFailed(nil)) == .retrying)
+    #expect(BudsSession.issue(for: GATTError.timedOut("Bluetooth")) == .retrying)
+    #expect(BudsSession.issue(for: GATTError.notifyFailed(nil)) == .retrying)
+    #expect(BudsSession.issue(for: GATTError.notSent(12)) == .retrying)
+    #expect(BudsSession.issue(for: GATTError.missing([])) == .generic)
+    #expect(BudsSession.issue(for: GATTError.ambiguous(2)) == .generic)
+    #expect(BudsSession.issue(for: BudsError.disconnected) == .generic)
+    session.clearError()
+    #expect(session.lastError == nil)
+    session.disconnect()
+    #expect(session.pausedByUser)
+    #expect(session.connectionIssue == .none)
+    #expect(session.connectionStep == .finding)
+
+    let snap = LastKnownBuds(name: "OnePlus Buds 4", left: 91, right: 88, chargingCase: 66, firmware: "112.112.100", seenAt: Date(timeIntervalSince1970: 1_700_000_000))
+    let encoded = try? JSONEncoder().encode(snap)
+    let decoded = encoded.flatMap { try? JSONDecoder().decode(LastKnownBuds.self, from: $0) }
+    #expect(decoded == snap)
+    #expect(snap.hasBattery)
+    #expect(snap.level(for: .left)?.percent == 91)
+    #expect(snap.level(for: .right)?.percent == 88)
+    #expect(snap.level(for: .chargingCase)?.percent == 66)
+  }
+
   /// The same table as ModelProfile in app/src/lib/protocol.ts, through app/tests/fixtures/profiles.json.
   @Test func profilesMatchTheFixtureSharedWithTheWebTests() throws {
     let fixture = try #require(load("profiles.json") as? [String: [String: Any]])
