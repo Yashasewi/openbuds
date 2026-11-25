@@ -17,6 +17,9 @@ final class AppPrefs {
   var connectCard = UserDefaults.standard.object(forKey: "connectCard") as? Bool ?? true {
     didSet { UserDefaults.standard.set(connectCard, forKey: "connectCard") }
   }
+  var compactHome = UserDefaults.standard.object(forKey: "compactHome") as? Bool ?? true {
+    didSet { UserDefaults.standard.set(compactHome, forKey: "compactHome") }
+  }
 
   func setOpenAtLogin(_ on: Bool) {
     loginError = nil

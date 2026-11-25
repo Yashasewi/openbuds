@@ -15,10 +15,16 @@ final class PanelModel {
   var editing: Preset?
   var editingIsNew = false
   var ringing = false
+  var expandedHome = false
   let updates = UpdateChecker()
+
+  @ObservationIgnored private var popoverOpen = true
+  @ObservationIgnored private var collapseWork: DispatchWorkItem?
 
   func open(_ next: Page) {
     guard next != page else { return }
+    collapseWork?.cancel()
+    collapseWork = nil
     history.append(page)
     forward = true
     withAnimation(.snappy(duration: 0.18)) { page = next }
@@ -34,6 +40,42 @@ final class PanelModel {
     history.removeAll()
     forward = false
     page = .home
+  }
+
+  func toggleHomeCompact(prefs: AppPrefs, reduceMotion: Bool) {
+    collapseWork?.cancel()
+    collapseWork = nil
+    let apply = {
+      if !prefs.compactHome {
+        prefs.compactHome = true
+        self.expandedHome = false
+      } else {
+        self.expandedHome.toggle()
+      }
+    }
+    if reduceMotion { apply() } else { withAnimation(.snappy(duration: 0.2)) { apply() } }
+  }
+
+  func onPopoverOpen() {
+    popoverOpen = true
+    collapseWork?.cancel()
+    collapseWork = nil
+  }
+
+  func onPopoverClose(compactDefault: Bool) {
+    popoverOpen = false
+    collapseWork?.cancel()
+    collapseWork = nil
+    // Only auto-collapse Home after 5s closed; never pull a user off a subpage.
+    guard compactDefault, page == .home, expandedHome else { return }
+    let work = DispatchWorkItem { [weak self] in
+      MainActor.assumeIsolated {
+        guard let self, !self.popoverOpen, self.page == .home else { return }
+        self.expandedHome = false
+      }
+    }
+    collapseWork = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + 5, execute: work)
   }
 }
 
@@ -133,17 +175,19 @@ private struct PanelButtonBody: View {
   }
 }
 
-/// Unified 24×24 circular icon button (Header Disconnect/Quit, SubPage Back, ConnectCard Close).
+/// Unified 24×24 circular icon button (Header Compact/Disconnect/Quit, SubPage Back, ConnectCard Close).
 struct CircleIconButtonStyle: ButtonStyle {
+  var active: Bool = false
   @Environment(\.isEnabled) private var isEnabled
 
   func makeBody(configuration: Configuration) -> some View {
-    CircleIconButtonBody(configuration: configuration, isEnabled: isEnabled)
+    CircleIconButtonBody(configuration: configuration, active: active, isEnabled: isEnabled)
   }
 }
 
 private struct CircleIconButtonBody: View {
   let configuration: ButtonStyle.Configuration
+  let active: Bool
   let isEnabled: Bool
   @State private var hovering = false
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -151,15 +195,99 @@ private struct CircleIconButtonBody: View {
   var body: some View {
     configuration.label
       .font(.system(size: 11, weight: .semibold))
-      .foregroundStyle(hovering && isEnabled ? .primary : .secondary)
+      .foregroundStyle(active || (hovering && isEnabled) ? .primary : .secondary)
       .frame(width: 24, height: 24)
-      .background(hovering && isEnabled ? AnyShapeStyle(.fill.secondary) : AnyShapeStyle(.fill.tertiary), in: .circle)
-      .overlay(Circle().strokeBorder(Color.primary.opacity(hovering && isEnabled ? 0.22 : 0.12), lineWidth: 1))
+      .background(
+        active ? AnyShapeStyle(Color.accentColor.opacity(hovering && isEnabled ? 0.28 : 0.2))
+          : hovering && isEnabled ? AnyShapeStyle(.fill.secondary)
+          : AnyShapeStyle(.fill.tertiary),
+        in: .circle
+      )
+      .overlay(
+        Circle().strokeBorder(
+          active ? Color.accentColor.opacity(0.45)
+            : Color.primary.opacity(hovering && isEnabled ? 0.22 : 0.12),
+          lineWidth: 1
+        )
+      )
       .contentShape(.circle)
       .opacity(isEnabled ? (configuration.isPressed ? 0.8 : 1) : 0.45)
       .scaleEffect(configuration.isPressed && !reduceMotion ? 0.94 : 1)
       .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovering)
       .onHover { hovering = $0 }
+  }
+}
+
+/// Observes MenuBarExtra popover window focus transitions so auto-compact runs only after closing.
+private struct PopoverWindowObserver: NSViewRepresentable {
+  let onOpen: () -> Void
+  let onClose: () -> Void
+
+  func makeCoordinator() -> Coordinator {
+    Coordinator(onOpen: onOpen, onClose: onClose)
+  }
+
+  func makeNSView(context: Context) -> ObserverView {
+    let view = ObserverView()
+    view.onWindowChange = { [weak coordinator = context.coordinator] window in
+      coordinator?.attach(to: window)
+    }
+    return view
+  }
+
+  func updateNSView(_ nsView: ObserverView, context: Context) {
+    context.coordinator.onOpen = onOpen
+    context.coordinator.onClose = onClose
+    context.coordinator.attach(to: nsView.window)
+  }
+
+  final class ObserverView: NSView {
+    var onWindowChange: ((NSWindow?) -> Void)?
+    override func viewDidMoveToWindow() {
+      super.viewDidMoveToWindow()
+      onWindowChange?(window)
+    }
+  }
+
+  @MainActor
+  final class Coordinator {
+    var onOpen: () -> Void
+    var onClose: () -> Void
+    private weak var observedWindow: NSWindow?
+    nonisolated(unsafe) private var tokens: [NSObjectProtocol] = []
+
+    init(onOpen: @escaping () -> Void, onClose: @escaping () -> Void) {
+      self.onOpen = onOpen
+      self.onClose = onClose
+    }
+
+    func attach(to window: NSWindow?) {
+      guard window !== observedWindow else { return }
+      tokens.forEach { NotificationCenter.default.removeObserver($0) }
+      tokens.removeAll()
+      observedWindow = window
+      guard let window else { return }
+      let center = NotificationCenter.default
+      tokens.append(
+        center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
+          MainActor.assumeIsolated { self?.onOpen() }
+        }
+      )
+      tokens.append(
+        center.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
+          MainActor.assumeIsolated { self?.onClose() }
+        }
+      )
+      tokens.append(
+        center.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
+          MainActor.assumeIsolated { self?.onClose() }
+        }
+      )
+    }
+
+    deinit {
+      tokens.forEach { NotificationCenter.default.removeObserver($0) }
+    }
   }
 }
 
@@ -185,17 +313,29 @@ struct PanelView: View {
     .frame(width: Metrics.width)
     .font(.callout)
     .clipped()
+    .background(
+      PopoverWindowObserver(
+        onOpen: { model.onPopoverOpen() },
+        onClose: { model.onPopoverClose(compactDefault: prefs.compactHome) }
+      )
+    )
+    .onAppear { model.onPopoverOpen() }
+    .onDisappear { model.onPopoverClose(compactDefault: prefs.compactHome) }
     .onChange(of: session.isConnected) { _, connected in
       if !connected {
         model.ringing = false
+        model.expandedHome = false
         if model.page != .about { model.home() }
       }
+    }
+    .onChange(of: prefs.compactHome) { _, compact in
+      if !compact { model.expandedHome = false }
     }
   }
 
   @ViewBuilder private var page: some View {
     switch displayedPage {
-    case .home: HomePage(session: session, model: model, audio: audio)
+    case .home: HomePage(session: session, model: model, audio: audio, prefs: prefs)
     case .sound: SoundPage(session: session, model: model)
     case .controls: ControlsPage(session: session, model: model)
     case .features: FeaturesPage(session: session, model: model, prefs: prefs, showConnectCard: showConnectCard)
@@ -213,7 +353,12 @@ struct HomePage: View {
   let session: BudsSession
   let model: PanelModel
   let audio: OutputAudio
+  let prefs: AppPrefs
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  private var isExpanded: Bool {
+    !prefs.compactHome || model.expandedHome
+  }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -227,19 +372,27 @@ struct HomePage: View {
       case .connected:
         PanelSection { BatteryRow(session: session).padding(.vertical, 10) }
         PanelSection { NoiseControl(session: session).padding(.vertical, 9) }
-        VolumeSection(session: session, audio: audio)
-        let hasTools = [0x0400, 0x0405, 0x040D].contains(where: { session.supports($0) })
-        Grid(horizontalSpacing: 8, verticalSpacing: 8) {
-          GridRow {
-            NavTile(icon: "slider.vertical.3", color: .pink, title: "Sound", value: presetName ?? "Equalizer") { model.open(.sound) }
-            NavTile(icon: "hand.tap.fill", color: .blue, title: "Controls", value: "Taps and holds") { model.open(.controls) }
-          }
-          GridRow {
-            NavTile(icon: "switch.2", color: .green, title: "Features", value: featureSummary) { model.open(.features) }
-              .gridCellColumns(hasTools ? 1 : 2)
-            if hasTools {
-              NavTile(icon: "wrench.and.screwdriver.fill", color: .orange, title: "Tools", value: "Find and fit") { model.open(.tools) }
+        if isExpanded {
+          VolumeSection(session: session, audio: audio)
+          let hasTools = [0x0400, 0x0405, 0x040D].contains(where: { session.supports($0) })
+          Grid(horizontalSpacing: 8, verticalSpacing: 8) {
+            GridRow {
+              NavTile(icon: "slider.vertical.3", color: .pink, title: "Sound", value: presetName ?? "Equalizer") { model.open(.sound) }
+              NavTile(icon: "hand.tap.fill", color: .blue, title: "Controls", value: "Taps and holds") { model.open(.controls) }
             }
+            GridRow {
+              NavTile(icon: "switch.2", color: .green, title: "Features", value: featureSummary) { model.open(.features) }
+                .gridCellColumns(hasTools ? 1 : 2)
+              if hasTools {
+                NavTile(icon: "wrench.and.screwdriver.fill", color: .orange, title: "Tools", value: "Find and fit") { model.open(.tools) }
+              }
+            }
+          }
+          .transition(.opacity)
+        }
+        if prefs.compactHome {
+          HomeExpandBar(expanded: isExpanded) {
+            model.toggleHomeCompact(prefs: prefs, reduceMotion: reduceMotion)
           }
         }
       case .connecting(let name):
@@ -268,7 +421,9 @@ struct HomePage: View {
         .background(Color.orange.opacity(0.12), in: .rect(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.orange.opacity(0.28), lineWidth: 1))
       }
-      AboutFooter(connected: session.isConnected, hasUpdate: hasUpdate) { model.open(.about) }
+      if !session.isConnected || session.unsupported != nil || isExpanded {
+        AboutFooter(connected: session.isConnected, hasUpdate: hasUpdate) { model.open(.about) }
+      }
     }
     .padding(Metrics.padding)
     .background(alignment: .top) {
@@ -574,6 +729,16 @@ struct HomePage: View {
       }
       Spacer(minLength: 4)
       if session.busy { ProgressView().controlSize(.small) }
+      if session.isConnected, session.unsupported == nil {
+        Button {
+          model.toggleHomeCompact(prefs: prefs, reduceMotion: reduceMotion)
+        } label: {
+          Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+        }
+        .buttonStyle(CircleIconButtonStyle(active: !isExpanded))
+        .help(isExpanded ? "Switch to compact view" : "Expand all controls")
+        .accessibilityLabel(isExpanded ? "Switch to compact view" : "Expand all controls")
+      }
       if session.isConnected {
         Button { session.disconnect() } label: {
           Image(systemName: "eject")
@@ -868,6 +1033,43 @@ struct NavTile: View {
       .frame(maxWidth: .infinity)
       .background(hovering ? AnyShapeStyle(.fill.tertiary) : AnyShapeStyle(.fill.quaternary), in: .rect(cornerRadius: Metrics.section))
       .contentShape(.rect(cornerRadius: Metrics.section))
+    }
+    .buttonStyle(.plain)
+    .onHover { hovering = $0 }
+    .animation(.easeOut(duration: 0.12), value: hovering)
+  }
+}
+
+/// Slim bar at the bottom of connected Home to expand or collapse all controls.
+struct HomeExpandBar: View {
+  let expanded: Bool
+  let action: () -> Void
+  @State private var hovering = false
+
+  var body: some View {
+    Button(action: action) {
+      HStack(spacing: 7) {
+        if !expanded {
+          HStack(spacing: 3) {
+            Circle().fill(Color.pink).frame(width: 5, height: 5)
+            Circle().fill(Color.blue).frame(width: 5, height: 5)
+            Circle().fill(Color.green).frame(width: 5, height: 5)
+            Circle().fill(Color.orange).frame(width: 5, height: 5)
+          }
+        }
+        Text(expanded ? "Compact view" : "More controls")
+          .font(.caption.weight(.medium))
+          .foregroundStyle(hovering ? .primary : .secondary)
+        Spacer(minLength: 4)
+        Image(systemName: expanded ? "chevron.up" : "chevron.down")
+          .font(.system(size: 10, weight: .semibold))
+          .foregroundStyle(hovering ? .primary : .secondary)
+      }
+      .padding(.horizontal, 11)
+      .padding(.vertical, 7)
+      .frame(maxWidth: .infinity)
+      .background(hovering ? AnyShapeStyle(.fill.tertiary) : AnyShapeStyle(.fill.quaternary), in: .rect(cornerRadius: 11))
+      .contentShape(.rect(cornerRadius: 11))
     }
     .buttonStyle(.plain)
     .onHover { hovering = $0 }

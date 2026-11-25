@@ -1058,6 +1058,12 @@ struct FeaturesPage: View {
             .controlSize(.small)
         }
         .padding(.vertical, 7)
+        Divider()
+        ToggleRow(
+          title: "Compact home",
+          subtitle: "Show battery and noise control first. Resets 5s after closing.",
+          isOn: Binding(get: { prefs.compactHome }, set: { prefs.compactHome = $0 })
+        )
       }
     }
   }
