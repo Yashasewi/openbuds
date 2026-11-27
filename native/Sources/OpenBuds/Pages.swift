@@ -41,9 +41,11 @@ struct SwitchRow: View {
             confirmDisabled: session.busy,
             cancel: { confirmingOff = false },
             confirm: {
-              guard !session.busy else { return }
-              confirmingOff = false
-              Task { await session.setSwitch(item, false) }
+              Task {
+                if await session.setSwitch(item, false) {
+                  confirmingOff = false
+                }
+              }
             }
           )
           .padding(.bottom, 8)
@@ -1496,6 +1498,7 @@ struct HearingPage: View {
   }
 
   private func slide(to value: Double) {
+    guard active else { return }
     let index = Int(value.rounded())
     guard index != levels[step] else { return }
     levels[step] = index
@@ -1508,6 +1511,7 @@ struct HearingPage: View {
   }
 
   private func play(_ at: Int) {
+    guard active else { return }
     let level = levels[at]
     if level >= hearingLoud, !warned {
       warned = true
@@ -1562,6 +1566,7 @@ struct HearingPage: View {
   }
 
   private func go(_ next: Int) {
+    guard active else { return }
     step = next
     play(next)
   }

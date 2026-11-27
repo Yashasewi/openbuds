@@ -19,6 +19,7 @@ public enum ConnectionStep: Int, Equatable, Sendable {
 
 /// Local snapshot of the last connected pair so the standby panel keeps the user's earbuds and last battery visible.
 public struct LastKnownBuds: Codable, Equatable, Sendable {
+  public let pairId: String?
   public let productId: String?
   public let name: String
   public let left: Int?
@@ -27,7 +28,17 @@ public struct LastKnownBuds: Codable, Equatable, Sendable {
   public let firmware: String?
   public let seenAt: Date
 
-  public init(productId: String? = nil, name: String, left: Int?, right: Int?, chargingCase: Int?, firmware: String?, seenAt: Date) {
+  public init(
+    pairId: String? = nil,
+    productId: String? = nil,
+    name: String,
+    left: Int?,
+    right: Int?,
+    chargingCase: Int?,
+    firmware: String?,
+    seenAt: Date
+  ) {
+    self.pairId = pairId
     self.productId = productId
     self.name = name
     self.left = left
@@ -37,9 +48,13 @@ public struct LastKnownBuds: Codable, Equatable, Sendable {
     self.seenAt = seenAt
   }
 
-  public func matches(productId: String, name: String) -> Bool {
-    if let storedId = self.productId { return storedId == productId }
-    return self.name == name
+  /// Only inherit readings when both snapshots carry the same per-pair identifier.
+  /// Legacy snapshots without a `pairId` never reuse cached readings across pairs.
+  public func matches(pairId: String?) -> Bool {
+    guard let stored = self.pairId, !stored.isEmpty,
+      let pairId, !pairId.isEmpty
+    else { return false }
+    return stored.caseInsensitiveCompare(pairId) == .orderedSame
   }
 
   public func level(for part: Part) -> BatteryLevel? {
@@ -174,8 +189,10 @@ public final class BudsSession {
 
   private func recordLastKnown() {
     guard isConnected, unsupported == nil, profile.isKnown else { return }
-    let previous = lastKnown.flatMap { $0.matches(productId: profile.productId, name: profile.displayName) ? $0 : nil }
+    let pairId = device?.addressString
+    let previous = lastKnown.flatMap { $0.matches(pairId: pairId) ? $0 : nil }
     let snapshot = LastKnownBuds(
+      pairId: pairId,
       productId: profile.productId,
       name: profile.displayName,
       left: battery[.left]?.percent ?? previous?.left,
@@ -611,8 +628,16 @@ public final class BudsSession {
     }
   }
 
-  public func setSwitch(_ s: Switch, _ on: Bool) async {
-    await run("switch-\(s.rawValue)") {
+  @discardableResult
+  public func setSwitch(_ s: Switch, _ on: Bool) async -> Bool {
+    let key = "switch-\(s.rawValue)"
+    guard isConnected, !busy else {
+      if isConnected {
+        setStatus(key, .failed("Another change is still in progress. Try again."), clearAfter: 4)
+      }
+      return false
+    }
+    await run(key) {
       guard profile.switchesWritable.contains(s.rawValue) else { throw BudsError.notOffered("Changing \(s.title) on \(profile.displayName)") }
       if s == .hiRes, !hiResAvailable {
         throw BudsError.notOffered("Hi-Res audio over \(codec.flatMap { codecNames[$0] } ?? "this codec")")
@@ -624,6 +649,7 @@ public final class BudsSession {
         devices = try? decodeDevices(try await query(0x0112))
       }
     }
+    return true
   }
 
   public func setHoldCycle(_ modes: Set<HoldMode>) async {

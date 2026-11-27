@@ -1,4 +1,5 @@
 import AudioToolbox
+import BudsKit
 import CoreAudio
 import Observation
 
@@ -33,10 +34,7 @@ final class OutputAudio {
 
   /// The output device for the earbuds the session is talking to, if CoreAudio has one.
   func buds(named name: String?) -> Device? {
-    if let name, let exact = outputs.first(where: { $0.bluetooth && $0.name == name }) {
-      return exact
-    }
-    return outputs.first { $0.bluetooth && $0.name.localizedCaseInsensitiveContains("OnePlus Buds") }
+    matchBudsOutput(outputs.filter(\.bluetooth), named: name, name: \.name)
   }
 
   func setVolume(_ value: Double) {
