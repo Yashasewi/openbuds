@@ -17,6 +17,16 @@ public enum ConnectionStep: Int, Equatable, Sendable {
   case reading = 3
 }
 
+public nonisolated func summarizeWearing(_ wearing: [Part: WearState]) -> String? {
+  let leftInEar = wearing[.left]?.inEar == true
+  let rightInEar = wearing[.right]?.inEar == true
+  if leftInEar && rightInEar { return "In both ears" }
+  if leftInEar { return "Left in ear" }
+  if rightInEar { return "Right in ear" }
+  if wearing[.left]?.inCase == true && wearing[.right]?.inCase == true { return "In the case" }
+  return nil
+}
+
 /// Local snapshot of the last connected pair so the standby panel keeps the user's earbuds and last battery visible.
 public struct LastKnownBuds: Codable, Equatable, Sendable {
   public let pairId: String?
@@ -78,6 +88,7 @@ public struct LastKnownBuds: Codable, Equatable, Sendable {
 public final class BudsSession {
   public enum Connection: Equatable {
     case searching
+    case selecting
     case connecting(String)
     case connected(String)
     case unavailable(String)
@@ -89,7 +100,13 @@ public final class BudsSession {
   public private(set) var pausedByUser = false
   public private(set) var pairedName: String?
   public private(set) var pairedAudioConnected = false
+  public private(set) var availableDevices: [ConnectedBudsDevice] = []
+  public private(set) var activeDeviceID: UUID?
+  public private(set) var activeBluetoothName: String?
+  public private(set) var preferredDeviceID: UUID?
+  public private(set) var switchingDevice = false
   public private(set) var lastKnown: LastKnownBuds?
+  public private(set) var knownSnapshots: [UUID: LastKnownBuds] = [:]
   /// The allow-list in force: identity reads only until the product id has a profile (`ModelProfile.probe`).
   public private(set) var profile: ModelProfile = .probe
   /// Set for a product id with no profile; the session is then read-only.
@@ -132,6 +149,30 @@ public final class BudsSession {
   public var hiResAvailable: Bool { codec == 7 || codec == 8 }
   /// Lowest earbud level, for the menu-bar icon.
   public var lowestBud: Int? { [battery[.left]?.percent, battery[.right]?.percent].compactMap { $0 }.min() }
+  /// True when another connected pair shares the active pair's Bluetooth name.
+  public var isActiveNameDuplicate: Bool {
+    guard let id = activeDeviceID, let active = availableDevices.first(where: { $0.id == id }) else { return false }
+    return hasDuplicateBudsName(availableDevices, for: active)
+  }
+  /// Plain-English wear status for the popover header (Human Pattern).
+  public var wearingSummary: String? {
+    summarizeWearing(wearing)
+  }
+
+  public func lastKnown(for id: UUID) -> LastKnownBuds? {
+    knownSnapshots[id]
+  }
+
+  public func isDuplicateName(_ candidate: ConnectedBudsDevice) -> Bool {
+    hasDuplicateBudsName(availableDevices, for: candidate)
+  }
+
+  public func displayLabel(for candidate: ConnectedBudsDevice) -> String {
+    if hasDuplicateBudsName(availableDevices, for: candidate) {
+      return "\(candidate.name) \(candidate.shortTag)"
+    }
+    return candidate.name
+  }
 
   @ObservationIgnored private let link = GATTLink()
   @ObservationIgnored private let watcher = DeviceWatcher()
@@ -151,6 +192,8 @@ public final class BudsSession {
   @ObservationIgnored private var statusTimers: [String: DispatchWorkItem] = [:]
 
   private static let lastKnownKey = "openbuds.lastKnownBuds"
+  private static let knownSnapshotsKey = "openbuds.knownBudsByPair"
+  private static let preferredDeviceKey = "openbuds.preferredDeviceID"
 
   public init() {
     if let data = UserDefaults.standard.data(forKey: Self.lastKnownKey),
@@ -158,19 +201,44 @@ public final class BudsSession {
     {
       lastKnown = saved
     }
+    if let data = UserDefaults.standard.data(forKey: Self.knownSnapshotsKey),
+       let raw = try? JSONDecoder().decode([String: LastKnownBuds].self, from: data)
+    {
+      var mapped: [UUID: LastKnownBuds] = [:]
+      for (key, value) in raw {
+        if let uuid = UUID(uuidString: key) { mapped[uuid] = value }
+      }
+      knownSnapshots = mapped
+    }
+    if let raw = UserDefaults.standard.string(forKey: Self.preferredDeviceKey),
+       let uuid = UUID(uuidString: raw)
+    {
+      preferredDeviceID = uuid
+    }
     link.onData = { [weak self] bytes in self?.received(bytes) }
-    link.onClose = { [weak self] in self?.closed(reason: "They reconnect by themselves when you take them out of the case.") }
+    link.onClose = { [weak self] in
+      guard let self else { return }
+      self.closed(reason: "They reconnect by themselves when you take them out of the case.")
+      Task { await self.recoverAfterDisconnect() }
+    }
     watcher.onConnect = { [weak self] device in
       guard let self, RFCOMMLink.candidates().contains(where: { $0.addressString == device.addressString }) else { return }
       self.refreshPairedState()
       // Give the buds a moment to bring up their services after the baseband connects.
-      DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { MainActor.assumeIsolated { self.autoConnect() } }
+      DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+        MainActor.assumeIsolated {
+          if self.isConnected {
+            Task { await self.refreshAvailableDevices() }
+          } else {
+            self.autoConnect()
+          }
+        }
+      }
     }
     watcher.onDisconnect = { [weak self] _ in
-      self?.retryTimer?.cancel()
-      self?.link.close()
-      self?.refreshPairedState()
-      self?.closed(reason: "They reconnect by themselves when you take them out of the case.")
+      guard let self else { return }
+      self.refreshPairedState()
+      Task { await self.handleClassicDisconnect() }
     }
   }
 
@@ -182,15 +250,36 @@ public final class BudsSession {
 
   private func refreshPairedState() {
     let candidates = RFCOMMLink.candidates()
-    let connected = candidates.first(where: { $0.isConnected() })
-    pairedName = connected?.name ?? candidates.first?.name
-    pairedAudioConnected = connected != nil
+    let connected = candidates.filter { $0.isConnected() }
+    pairedName = connected.first?.name ?? candidates.first?.name
+    pairedAudioConnected = !connected.isEmpty
+    watcher.watchDisconnect(of: connected)
+  }
+
+  private func setPreferredDevice(_ id: UUID?) {
+    preferredDeviceID = id
+    if let id {
+      UserDefaults.standard.set(id.uuidString, forKey: Self.preferredDeviceKey)
+    } else {
+      UserDefaults.standard.removeObject(forKey: Self.preferredDeviceKey)
+    }
+  }
+
+  private func persistKnownSnapshots() {
+    var raw: [String: LastKnownBuds] = [:]
+    for (id, snapshot) in knownSnapshots {
+      raw[id.uuidString] = snapshot
+    }
+    if let data = try? JSONEncoder().encode(raw) {
+      UserDefaults.standard.set(data, forKey: Self.knownSnapshotsKey)
+    }
   }
 
   private func recordLastKnown() {
     guard isConnected, unsupported == nil, profile.isKnown else { return }
-    let pairId = device?.addressString
-    let previous = lastKnown.flatMap { $0.matches(pairId: pairId) ? $0 : nil }
+    let pairId = activeDeviceID?.uuidString ?? device?.addressString
+    let previous = activeDeviceID.flatMap { knownSnapshots[$0] }
+      ?? lastKnown.flatMap { $0.matches(pairId: pairId) ? $0 : nil }
     let snapshot = LastKnownBuds(
       pairId: pairId,
       productId: profile.productId,
@@ -202,6 +291,10 @@ public final class BudsSession {
       seenAt: Date()
     )
     lastKnown = snapshot
+    if let activeDeviceID {
+      knownSnapshots[activeDeviceID] = snapshot
+      persistKnownSnapshots()
+    }
     if let data = try? JSONEncoder().encode(snapshot) {
       UserDefaults.standard.set(data, forKey: Self.lastKnownKey)
     }
@@ -209,7 +302,7 @@ public final class BudsSession {
 
   private func autoConnect() {
     guard !userDisconnected else { return }
-    Task { await connect() }
+    Task { await attempt(retrying: false, userInitiated: false) }
   }
 
   public func clearError() {
@@ -219,7 +312,96 @@ public final class BudsSession {
   public func connect() async {
     userDisconnected = false
     pausedByUser = false
-    await attempt(retrying: false)
+    await attempt(retrying: false, userInitiated: true)
+  }
+
+  /// Connects directly to a specific connected peripheral UUID, cleanly switching if another pair is active.
+  public func selectDevice(_ id: UUID) async {
+    if isConnected, activeDeviceID == id { return }
+    setPreferredDevice(id)
+    userDisconnected = false
+    pausedByUser = false
+    retryTimer?.cancel()
+    if isConnected || connecting {
+      switchingDevice = true
+      recordLastKnown()
+      batteryTimer?.cancel()
+      failPending()
+      link.close()
+      device = nil
+      activeDeviceID = nil
+      activeBluetoothName = nil
+      resetDeviceState()
+      connection = .searching
+    }
+    defer { switchingDevice = false }
+    await attempt(retrying: false, explicitID: id, userInitiated: true)
+  }
+
+  /// Refreshes the list of currently connected earbuds without interrupting an active connection.
+  public func refreshAvailableDevices() async {
+    refreshPairedState()
+    guard Self.currentBluetoothIssue() == nil else {
+      availableDevices = []
+      return
+    }
+    guard pairedAudioConnected || CBManager.authorization == .allowedAlways || isConnected || connection == .selecting else {
+      availableDevices = []
+      return
+    }
+    guard let found = try? await link.connectedDevices() else { return }
+    availableDevices = found
+
+    if isConnected, let activeID = activeDeviceID, !found.contains(where: { $0.id == activeID }) {
+      retryTimer?.cancel()
+      link.close()
+      closed(reason: "They reconnect by themselves when you take them out of the case.")
+      await recoverAfterDisconnect()
+      return
+    }
+
+    if connection == .selecting, !userDisconnected {
+      if found.count == 1, let only = found.first {
+        await attempt(retrying: false, explicitID: only.id, userInitiated: false)
+      } else if found.isEmpty {
+        connectionIssue = .none
+        connectionStep = .finding
+        connection = .unavailable("Connect your OnePlus earbuds to this Mac in Bluetooth settings.")
+      }
+    }
+  }
+
+  private func handleClassicDisconnect() async {
+    if isConnected, let activeID = activeDeviceID {
+      // Only tear down the active GATT link if the active peripheral itself disappeared.
+      if let found = try? await link.connectedDevices() {
+        availableDevices = found
+        if found.contains(where: { $0.id == activeID }) {
+          return
+        }
+      }
+      retryTimer?.cancel()
+      link.close()
+      closed(reason: "They reconnect by themselves when you take them out of the case.")
+      await recoverAfterDisconnect()
+      return
+    }
+    if connection == .selecting || connecting {
+      await refreshAvailableDevices()
+    }
+  }
+
+  private func recoverAfterDisconnect() async {
+    guard !userDisconnected, !switchingDevice else { return }
+    guard let found = try? await link.connectedDevices() else { return }
+    availableDevices = found
+    if found.count == 1, let remaining = found.first {
+      await attempt(retrying: false, explicitID: remaining.id, userInitiated: false)
+    } else if found.count > 1 {
+      connectionIssue = .none
+      connectionStep = .finding
+      connection = .selecting
+    }
   }
 
   nonisolated static func issue(for error: Error) -> ConnectionIssue {
@@ -249,35 +431,86 @@ public final class BudsSession {
   }
 
   /// A retry keeps the last error on screen instead of flashing "Connecting" every few seconds.
-  private func attempt(retrying: Bool) async {
+  private func attempt(retrying: Bool, explicitID: UUID? = nil, userInitiated: Bool = false) async {
     guard !isConnected, !connecting, !userDisconnected else { return }
     retryTimer?.cancel()
     refreshPairedState()
     connectionStep = .finding
     if !retrying { connectionIssue = .none }
-    guard let target = RFCOMMLink.candidates().first(where: { $0.isConnected() }) else {
+
+    if let radio = Self.currentBluetoothIssue() {
+      availableDevices = []
+      connectionIssue = radio.issue
+      connection = .unavailable(radio.message)
+      return
+    }
+
+    // Avoid triggering a macOS Bluetooth permission prompt on first launch when no paired buds are connected yet.
+    if !pairedAudioConnected, CBManager.authorization == .notDetermined, explicitID == nil, !userInitiated {
+      availableDevices = []
       connectionStep = .finding
-      if let radio = Self.currentBluetoothIssue() {
-        connectionIssue = radio.issue
-        connection = .unavailable(radio.message)
+      connectionIssue = .none
+      connection = .unavailable("Connect your OnePlus earbuds to this Mac in Bluetooth settings.")
+      return
+    }
+
+    let found: [ConnectedBudsDevice]
+    do {
+      found = try await link.connectedDevices()
+    } catch {
+      availableDevices = []
+      connectionIssue = Self.issue(for: error)
+      connection = .unavailable(error.localizedDescription)
+      if (error as? GATTError)?.retries == true { scheduleRetry() }
+      return
+    }
+
+    availableDevices = found
+    let selection = resolveBudsSelection(available: found, explicitID: explicitID, preferredID: preferredDeviceID)
+
+    switch selection {
+    case .none:
+      if pairedAudioConnected {
+        connectionStep = .finding
+        connectionIssue = .retrying
+        connection = .unavailable(GATTError.notFound.localizedDescription)
+        scheduleRetry()
       } else {
+        connectionStep = .finding
         connectionIssue = .none
         connection = .unavailable("Connect your OnePlus earbuds to this Mac in Bluetooth settings.")
       }
       return
+
+    case .choose:
+      connectionIssue = .none
+      connectionStep = .finding
+      connection = .selecting
+      return
+
+    case .connect(let picked):
+      await connectPeripheral(picked, retrying: retrying)
     }
+  }
+
+  private func connectPeripheral(_ picked: ConnectedBudsDevice, retrying: Bool) async {
     connecting = true
     defer { connecting = false }
-    let name = target.name ?? "OnePlus earbuds"
-    if !retrying { connection = .connecting(name) }
+    let label = displayLabel(for: picked)
+    if !retrying { connection = .connecting(label) }
     lastError = nil
     do {
       // GATT, not RFCOMM: channel 15 allows one program per Mac, and the website uses it.
       connectionStep = .linking
-      try await link.connect(named: target.name)
+      try await link.connect(peripheralID: picked.id)
       connectionStep = .reading
-      device = target
-      watcher.watchDisconnect(of: target)
+      activeDeviceID = picked.id
+      activeBluetoothName = picked.name
+      setPreferredDevice(picked.id)
+      let connectedClassic = RFCOMMLink.candidates().filter { $0.isConnected() }
+      let exactClassic = connectedClassic.filter { $0.name == picked.name }
+      device = exactClassic.count == 1 ? exactClassic.first : nil
+      watcher.watchDisconnect(of: connectedClassic)
       framer = Framer()
       resetDeviceState()
       caps = try decodeCapabilities(try await query(0x0100))
@@ -286,19 +519,22 @@ public final class BudsSession {
         // No profile, no setting changes: read the identity and show a report the owner can send us.
         // A disconnect during the reads goes to the catch below instead of showing Connected.
         try await diagnose(model: model, bitmap: caps?.bitmap ?? [])
-        guard device != nil else { throw BudsError.disconnected }
+        guard activeDeviceID != nil else { throw BudsError.disconnected }
         connectionIssue = .none
-        connection = .connected(name)
+        connection = .connected(picked.name)
         return
       }
       profile = known
       connectionIssue = .none
-      connection = .connected(name)
+      connection = .connected(picked.name)
       await refresh()
       try? await subscribeEvents()
     } catch {
       link.close()
       failPending()
+      activeDeviceID = nil
+      activeBluetoothName = nil
+      device = nil
       guard !userDisconnected else { return }
       connectionIssue = Self.issue(for: error)
       connection = .unavailable(error.localizedDescription)
@@ -354,6 +590,8 @@ public final class BudsSession {
     batteryTimer?.cancel()
     failPending()
     device = nil
+    activeDeviceID = nil
+    activeBluetoothName = nil
     resetDeviceState()
     connectionIssue = .none
     connectionStep = .finding

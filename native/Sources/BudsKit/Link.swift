@@ -2,6 +2,55 @@ import CoreBluetooth
 import Foundation
 import IOBluetooth
 
+/// A Bluetooth peripheral currently connected to this Mac that exposes the earbuds' control service.
+public struct ConnectedBudsDevice: Identifiable, Equatable, Hashable, Sendable {
+  public let id: UUID
+  public let name: String
+  public let hasControlService: Bool
+
+  public init(id: UUID, name: String, hasControlService: Bool = true) {
+    self.id = id
+    self.name = name
+    self.hasControlService = hasControlService
+  }
+
+  /// Stable 4-character hex suffix shown only when two connected pairs share the exact same Bluetooth name.
+  public var shortTag: String {
+    "#\(id.uuidString.suffix(4).uppercased())"
+  }
+}
+
+/// Outcome of deciding which connected peripheral to attach to automatically.
+public enum DeviceSelection: Equatable, Sendable {
+  case none
+  case connect(ConnectedBudsDevice)
+  case choose([ConnectedBudsDevice])
+}
+
+/// Picks a single target peripheral when unambiguous, or asks the user to choose when multiple pairs are connected.
+public nonisolated func resolveBudsSelection(
+  available: [ConnectedBudsDevice],
+  explicitID: UUID?,
+  preferredID: UUID?
+) -> DeviceSelection {
+  guard !available.isEmpty else { return .none }
+  if let explicitID, let picked = available.first(where: { $0.id == explicitID }) {
+    return .connect(picked)
+  }
+  if available.count == 1, let only = available.first {
+    return .connect(only)
+  }
+  if let preferredID, let preferred = available.first(where: { $0.id == preferredID }) {
+    return .connect(preferred)
+  }
+  return .choose(available)
+}
+
+/// True when more than one connected pair shares the same Bluetooth name (case-insensitive).
+public nonisolated func hasDuplicateBudsName(_ devices: [ConnectedBudsDevice], for device: ConnectedBudsDevice) -> Bool {
+  devices.filter { $0.name.caseInsensitiveCompare(device.name) == .orderedSame }.count > 1
+}
+
 /// The earbuds' control channel over GATT, attached to the classic connection macOS already has open
 /// (bluetoothd reports `transport: classic`). RFCOMM channel 15 stays free for the website.
 /// Same frames as RFCOMM: commands go to `0100079A`, replies and pushes arrive on `0200079A`.
@@ -37,25 +86,65 @@ final class GATTLink: NSObject {
   private var waiting: Step?
   private var stepAttempt = 0
 
-  /// Attaches to the already connected buds. Never scans and never opens RFCOMM.
-  func connect(named name: String?) async throws {
-    close()
+  var activePeripheralID: UUID? { peripheral?.identifier }
+
+  private func ensurePoweredOn() async throws -> CBCentralManager {
     let central = self.central ?? CBCentralManager(delegate: self, queue: .main)
     self.central = central
     switch central.state {
-    case .poweredOn: break
+    case .poweredOn: return central
     case .unauthorized: throw GATTError.unauthorized
     case .poweredOff, .unsupported: throw GATTError.poweredOff
-    default: try await wait(for: .power, timeout: 5) {}
+    default:
+      try await wait(for: .power, timeout: 5) {}
+      return central
     }
-    let found = central.retrieveConnectedPeripherals(withServices: Self.systemServices)
-    guard !found.isEmpty else { throw GATTError.notFound }
-    // CoreBluetooth does not expose the Bluetooth address, so only an unambiguous match is safe:
-    // with two pairs connected, a guess could change settings on the wrong one.
-    let matches = name.map { name in found.filter { $0.name == name } } ?? found
-    // No match yet: the selected pair's GATT service may still be starting while another pair's is up.
-    guard !matches.isEmpty else { throw GATTError.notFound }
-    guard matches.count == 1, let target = matches.first else { throw GATTError.ambiguous(matches.count) }
+  }
+
+  /// Queries `0000079A` first so a single pair advertising secondary BLE services (`079F`/`08A4`)
+  /// is not miscounted as two devices, falling back to all `systemServices` only if none appear.
+  private static func snapshotPeripherals(from central: CBCentralManager) -> (peripherals: [CBPeripheral], primaryIDs: Set<UUID>) {
+    let primary = central.retrieveConnectedPeripherals(withServices: [Self.service])
+    let primaryIDs = Set(primary.map(\.identifier))
+    let source = primary.isEmpty
+      ? central.retrieveConnectedPeripherals(withServices: Self.systemServices)
+      : primary
+    var seen = Set<UUID>()
+    let unique = source
+      .filter { seen.insert($0.identifier).inserted }
+      .sorted { lhs, rhs in
+        let l = lhs.name ?? ""
+        let r = rhs.name ?? ""
+        let cmp = l.localizedCaseInsensitiveCompare(r)
+        if cmp != .orderedSame { return cmp == .orderedAscending }
+        return lhs.identifier.uuidString < rhs.identifier.uuidString
+      }
+    return (unique, primaryIDs)
+  }
+
+  /// Lists every connected peripheral exposing the earbuds' control service without disturbing an active link.
+  func connectedDevices() async throws -> [ConnectedBudsDevice] {
+    let central = try await ensurePoweredOn()
+    let (peripherals, primaryIDs) = Self.snapshotPeripherals(from: central)
+    return peripherals.map { peripheral in
+      let trimmed = peripheral.name?.trimmingCharacters(in: .whitespacesAndNewlines)
+      let name = (trimmed?.isEmpty == false) ? trimmed! : "OnePlus earbuds"
+      return ConnectedBudsDevice(
+        id: peripheral.identifier,
+        name: name,
+        hasControlService: primaryIDs.contains(peripheral.identifier)
+      )
+    }
+  }
+
+  /// Attaches directly to a specific connected peripheral by its CoreBluetooth UUID. Never scans and never opens RFCOMM.
+  func connect(peripheralID: UUID) async throws {
+    close()
+    let central = try await ensurePoweredOn()
+    let (listed, _) = Self.snapshotPeripherals(from: central)
+    let target = listed.first(where: { $0.identifier == peripheralID })
+      ?? central.retrievePeripherals(withIdentifiers: [peripheralID]).first
+    guard let target else { throw GATTError.notFound }
     peripheral = target
     target.delegate = self
     try await wait(for: .connect, timeout: 10) {
@@ -237,7 +326,6 @@ enum GATTError: LocalizedError {
   case notifyFailed(String?)
   case frameTooLong(Int, Int)
   case notSent(Int)
-  case ambiguous(Int)
 
   /// Worth another try in a few seconds: the buds may still be bringing up their services.
   var retries: Bool {
@@ -258,7 +346,6 @@ enum GATTError: LocalizedError {
     case .notifyFailed(let r): "The earbuds didn’t turn on replies\(r.map { " (\($0))" } ?? ""). OpenBuds keeps trying."
     case .frameTooLong(let n, let max): "This change is \(n) bytes; the control link takes \(max) at a time."
     case .notSent(let n): "Couldn’t send a \(n)-byte command to the earbuds."
-    case .ambiguous(let n): "\(n) earbuds with the control service are connected, and OpenBuds can’t tell which one you picked. Disconnect the others in Bluetooth settings."
     }
   }
 }
@@ -293,11 +380,14 @@ final class RFCOMMLink: NSObject {
   }
 }
 
-/// Matches the connected earbuds' Bluetooth output device: prefers exact name match, and falls back
-/// to a `"OnePlus Buds"` substring match only when unambiguous (exactly one match).
+/// Matches the connected earbuds' Bluetooth output device: prefers an unambiguous exact name match,
+/// and falls back to a `"OnePlus Buds"` substring match only when unambiguous (exactly one match).
+/// If multiple outputs share the exact same name, returns `nil` rather than controlling the wrong pair.
 public nonisolated func matchBudsOutput<T>(_ outputs: [T], named target: String?, name: (T) -> String) -> T? {
-  if let target, let exact = outputs.first(where: { name($0) == target }) {
-    return exact
+  if let target {
+    let exact = outputs.filter { name($0) == target }
+    if exact.count == 1 { return exact.first }
+    if exact.count > 1 { return nil }
   }
   let fallback = outputs.filter { name($0).localizedCaseInsensitiveContains("OnePlus Buds") }
   return fallback.count == 1 ? fallback.first : nil
@@ -423,9 +513,11 @@ final class DeviceWatcher: NSObject {
   func start() {
     connectNote = IOBluetoothDevice.register(forConnectNotifications: self, selector: #selector(connected(_:device:)))
   }
-  func watchDisconnect(of device: IOBluetoothDevice) {
+  func watchDisconnect(of devices: [IOBluetoothDevice]) {
     disconnectNotes.forEach { $0.unregister() }
-    disconnectNotes = [device.register(forDisconnectNotification: self, selector: #selector(disconnected(_:device:)))].compactMap { $0 }
+    disconnectNotes = devices.compactMap {
+      $0.register(forDisconnectNotification: self, selector: #selector(disconnected(_:device:)))
+    }
   }
 
   @objc private nonisolated func connected(_ note: IOBluetoothUserNotification, device: IOBluetoothDevice) {

@@ -135,7 +135,6 @@ struct ProfileTests {
     #expect(BudsSession.issue(for: GATTError.notifyFailed(nil)) == .retrying)
     #expect(BudsSession.issue(for: GATTError.notSent(12)) == .retrying)
     #expect(BudsSession.issue(for: GATTError.missing([])) == .generic)
-    #expect(BudsSession.issue(for: GATTError.ambiguous(2)) == .generic)
     #expect(BudsSession.issue(for: BudsError.disconnected) == .generic)
     session.clearError()
     #expect(session.lastError == nil)
@@ -173,12 +172,55 @@ struct ProfileTests {
   @Test func audioOutputMatching() {
     // Exact name match wins even when another OnePlus Buds output comes first.
     #expect(matchBudsOutput(["OnePlus Buds Pro", "OnePlus Buds 3"], named: "OnePlus Buds 3", name: { $0 }) == "OnePlus Buds 3")
+    // Multiple outputs sharing the exact same name return nil rather than controlling the wrong pair.
+    #expect(matchBudsOutput(["OnePlus Buds 4", "OnePlus Buds 4"], named: "OnePlus Buds 4", name: { $0 }) == nil)
     // Unambiguous single fallback matches when the exact name is unavailable.
     #expect(matchBudsOutput(["MacBook Speakers", "OnePlus Buds 4"], named: "Renamed Buds", name: { $0 }) == "OnePlus Buds 4")
     // Multiple substring fallbacks with no exact match return nil rather than picking the wrong pair.
     #expect(matchBudsOutput(["OnePlus Buds Pro", "OnePlus Buds 3"], named: "OnePlus Buds 4", name: { $0 }) == nil)
     #expect(matchBudsOutput(["OnePlus Buds Pro", "OnePlus Buds 3"], named: nil, name: { $0 }) == nil)
     #expect(matchBudsOutput(["MacBook Speakers"], named: "OnePlus Buds 4", name: { $0 }) == nil)
+  }
+
+  @Test func multiDeviceSelectionAndDisambiguation() {
+    let idA = UUID(uuidString: "11111111-1111-1111-1111-11111111A3F2")!
+    let idB = UUID(uuidString: "22222222-2222-2222-2222-222222227C19")!
+    let buds4 = ConnectedBudsDevice(id: idA, name: "OnePlus Buds 4")
+    let buds3 = ConnectedBudsDevice(id: idB, name: "OnePlus Buds 3")
+    let buds4Second = ConnectedBudsDevice(id: idB, name: "oneplus buds 4")
+
+    #expect(buds4.shortTag == "#A3F2")
+    #expect(buds4Second.shortTag == "#7C19")
+
+    // Zero devices -> none.
+    #expect(resolveBudsSelection(available: [], explicitID: nil, preferredID: idA) == .none)
+    // Single device -> always auto-connects even if preferred differs.
+    #expect(resolveBudsSelection(available: [buds4], explicitID: nil, preferredID: idB) == .connect(buds4))
+    // Multiple devices with no preferred match -> ask the user to choose.
+    #expect(resolveBudsSelection(available: [buds4, buds3], explicitID: nil, preferredID: nil) == .choose([buds4, buds3]))
+    // Multiple devices with a remembered preferred pair -> auto-connects to preferred.
+    #expect(resolveBudsSelection(available: [buds4, buds3], explicitID: nil, preferredID: idB) == .connect(buds3))
+    // Explicit selection overrides remembered preferred pair.
+    #expect(resolveBudsSelection(available: [buds4, buds3], explicitID: idA, preferredID: idB) == .connect(buds4))
+
+    // Duplicate Bluetooth name detection is case-insensitive.
+    #expect(!hasDuplicateBudsName([buds4, buds3], for: buds4))
+    #expect(!hasDuplicateBudsName([buds4, buds3], for: buds3))
+    #expect(hasDuplicateBudsName([buds4, buds4Second], for: buds4))
+    #expect(hasDuplicateBudsName([buds4, buds4Second], for: buds4Second))
+  }
+
+  @Test func wearingSummaryDescriptions() {
+    let inEar = WearState(raw: 3)   // out of case (bit 0) + in ear (bit 1)
+    let inCase = WearState(raw: 0)  // in case (bit 0 == 0)
+    let outOfEar = WearState(raw: 1)
+
+    #expect(summarizeWearing([.left: inEar, .right: inEar]) == "In both ears")
+    #expect(summarizeWearing([.left: inEar, .right: inCase]) == "Left in ear")
+    #expect(summarizeWearing([.left: outOfEar, .right: inEar]) == "Right in ear")
+    #expect(summarizeWearing([.left: inCase, .right: inCase]) == "In the case")
+    #expect(summarizeWearing([.left: outOfEar, .right: outOfEar]) == nil)
+    #expect(summarizeWearing([:]) == nil)
   }
 
   /// The same table as ModelProfile in app/src/lib/protocol.ts, through app/tests/fixtures/profiles.json.

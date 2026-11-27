@@ -35,14 +35,17 @@
 | Tap and hold gestures, call controls, noise-control cycle | ✓ | ✓ |
 | Wear detection, game mode, dual connection, smart volume, BassWave, 3D audio | ✓ | ✓ |
 | Find my earbuds, fit test, Golden Sound hearing test | ✓ | ✓ |
-| Mac output volume, low-battery alerts, connect card, open at login | ✓ | |
+| Multiple connected earbuds picker & 1-click switching | ✓ | ✓ |
+| Compact Home view, Mac output volume, low-battery alerts, connect card, open at login | ✓ | |
 
 Every change waits for the earbuds to accept it, then reads the setting back, so what you see is what the earbuds are actually doing.
 
 <p align="center">
-  <img src="assets/panel.png" width="300" alt="The OpenBuds menu bar panel with battery, noise control, volume, and settings">
+  <img src="assets/panel.png" width="260" alt="The OpenBuds menu bar panel with battery, noise control, multi-device switcher, and settings">
   &nbsp;&nbsp;
-  <img src="assets/about.png" width="300" alt="The OpenBuds About page with update check and project links">
+  <img src="assets/picker.png" width="260" alt="The OpenBuds Choose earbuds picker when multiple pairs are connected">
+  &nbsp;&nbsp;
+  <img src="assets/about.png" width="260" alt="The OpenBuds About page with update check and project links">
 </p>
 
 ## Install the Mac app
@@ -62,6 +65,12 @@ The release is ad-hoc signed, so macOS knows the file hasn't been changed, but i
 <summary>The menu bar icon doesn't appear</summary>
 
 Open **System Settings → Menu Bar** and turn on **OpenBuds**. On a crowded menu bar, macOS may also hide it behind the notch.
+</details>
+
+<details>
+<summary>Using two pairs of earbuds on the same Mac</summary>
+
+When two or more compatible pairs are connected at once, OpenBuds shows a **Choose earbuds** picker and remembers your last selected pair. While connected, click the count badge (`2 ⌄`) next to the earbuds name in the header to switch pairs in one click. Each pair keeps its own last-seen battery snapshot. If two pairs share the exact same Bluetooth name, OpenBuds distinguishes them by a short ID tag (`#A3F2`); rename one pair in **System Settings → Bluetooth** if you also want per-pair Mac audio volume control.
 </details>
 
 <details>

@@ -54,6 +54,7 @@ final class Companion {
   private let launched = Date()
   private var cardPending = false
   private var alerted: [Part: Int] = [:]
+  private var alertedDeviceID: UUID?
 
   init(session: BudsSession, prefs: AppPrefs, audio: OutputAudio) {
     self.session = session
@@ -64,9 +65,15 @@ final class Companion {
   func start() {
     UNUserNotificationCenter.current().delegate = notifications
     track({ self.session.isConnected }) { connected in
-      // Skip the card for a connection that was already up when the app launched.
-      self.cardPending = connected && Date().timeIntervalSince(self.launched) > 5
+      // Skip the card for a connection already up at launch or an intentional in-panel switch.
+      self.cardPending = connected && !self.session.switchingDevice && Date().timeIntervalSince(self.launched) > 5
       if !connected { self.card.hide() }
+    }
+    track({ self.session.activeDeviceID }) { id in
+      if id != self.alertedDeviceID {
+        self.alertedDeviceID = id
+        self.alerted = [:]
+      }
     }
     track({ self.session.updatedAt }) { _ in
       guard self.cardPending else { return }
@@ -254,7 +261,20 @@ struct ConnectCardView: View {
   }
 
   private var connectedName: String? {
-    if case .connected(let name) = session.connection { name } else { nil }
+    if let bt = session.activeBluetoothName { return bt }
+    if case .connected(let name) = session.connection { return name }
+    return nil
+  }
+
+  private var cardSubtitle: String {
+    var parts: [String] = []
+    if let wear = session.wearingSummary {
+      parts.append(wear)
+    } else {
+      parts.append("Connected")
+    }
+    if let codec = session.codec.flatMap({ codecNames[$0] }) { parts.append(codec) }
+    return parts.joined(separator: " · ")
   }
 
   var body: some View {
@@ -262,7 +282,7 @@ struct ConnectCardView: View {
       HStack(spacing: 10) {
         VStack(alignment: .leading, spacing: 1) {
           Text(session.profile.isKnown ? session.profile.displayName : "OnePlus earbuds").font(.headline)
-          Text(session.codec.flatMap { codecNames[$0] }.map { "Connected · \($0)" } ?? "Connected")
+          Text(cardSubtitle)
             .font(.callout)
             .foregroundStyle(.secondary)
         }

@@ -84,10 +84,10 @@ struct InlineConfirmStrip: View {
     .padding(10)
     .background(
       (destructive ? Color.red : Color.orange).opacity(0.12),
-      in: .rect(cornerRadius: 10)
+      in: .rect(cornerRadius: Metrics.banner)
     )
     .overlay(
-      RoundedRectangle(cornerRadius: 10)
+      RoundedRectangle(cornerRadius: Metrics.banner)
         .strokeBorder((destructive ? Color.red : Color.orange).opacity(0.28), lineWidth: 1)
     )
     .transition(.opacity)
@@ -1262,10 +1262,10 @@ private struct FitSealPill: View {
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     .background(
       (isGood || isWarning ? tint.opacity(0.13) : Color.primary.opacity(0.06)),
-      in: .rect(cornerRadius: 11)
+      in: .rect(cornerRadius: Metrics.banner)
     )
     .overlay(
-      RoundedRectangle(cornerRadius: 11)
+      RoundedRectangle(cornerRadius: Metrics.banner)
         .strokeBorder(isGood || isWarning ? tint.opacity(0.32) : Color.primary.opacity(0.12), lineWidth: 1)
     )
   }
