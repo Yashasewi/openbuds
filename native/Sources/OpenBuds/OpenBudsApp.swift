@@ -62,6 +62,9 @@ struct MenuBarLabel: View {
   }
 
   private var summary: String {
+    if case .selecting = session.connection {
+      return "OpenBuds · \(session.availableDevices.count) earbuds connected — click to choose"
+    }
     guard session.isConnected else { return "OpenBuds · Not connected" }
     let name = session.profile.isKnown ? session.profile.displayName : "OpenBuds"
     var parts: [String] = [name]
@@ -75,6 +78,9 @@ struct MenuBarLabel: View {
     }
     if let mode = session.noise?.mode {
       parts.append(noiseLabel(mode))
+    }
+    if session.availableDevices.count > 1 {
+      parts.append("\(session.availableDevices.count) pairs connected")
     }
     return parts.count == 1 ? "\(name) · Connected" : parts.joined(separator: " · ")
   }

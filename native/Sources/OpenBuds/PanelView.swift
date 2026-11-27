@@ -83,6 +83,8 @@ enum Metrics {
   static let width: CGFloat = 320
   static let padding: CGFloat = 10
   static let section: CGFloat = 14
+  static let banner: CGFloat = 12
+  static let control: CGFloat = 10
   static let maxScroll: CGFloat = 560
 }
 
@@ -315,7 +317,10 @@ struct PanelView: View {
     .clipped()
     .background(
       PopoverWindowObserver(
-        onOpen: { model.onPopoverOpen() },
+        onOpen: {
+          model.onPopoverOpen()
+          Task { await session.refreshAvailableDevices() }
+        },
         onClose: { model.onPopoverClose(compactDefault: prefs.compactHome) }
       )
     )
@@ -399,6 +404,8 @@ struct HomePage: View {
         connectingView(title: "Linking \(name)", detail: "Opening the local control channel. Open the case lid or take one bud out.")
       case .searching:
         connectingView(title: "Looking for earbuds", detail: "Checking paired Bluetooth devices on this Mac.")
+      case .selecting:
+        DevicePickerCard(session: session, audio: audio)
       case .unavailable(let message):
         unavailableView(message: message)
       }
@@ -418,8 +425,8 @@ struct HomePage: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
-        .background(Color.orange.opacity(0.12), in: .rect(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.orange.opacity(0.28), lineWidth: 1))
+        .background(Color.orange.opacity(0.12), in: .rect(cornerRadius: Metrics.banner))
+        .overlay(RoundedRectangle(cornerRadius: Metrics.banner).strokeBorder(Color.orange.opacity(0.28), lineWidth: 1))
       }
       if !session.isConnected || session.unsupported != nil || isExpanded {
         AboutFooter(connected: session.isConnected, hasUpdate: hasUpdate) { model.open(.about) }
@@ -621,7 +628,7 @@ struct HomePage: View {
       }
     }
     switch session.connection {
-    case .searching, .connecting: return .accentColor
+    case .searching, .connecting, .selecting: return .accentColor
     case .unavailable:
       switch session.connectionIssue {
       case .bluetoothUnauthorized, .bluetoothOff: return .orange
@@ -640,6 +647,7 @@ struct HomePage: View {
     case .none, .generic:
       if case .searching = session.connection { return 0.14 }
       if case .connecting = session.connection { return 0.14 }
+      if case .selecting = session.connection { return 0.14 }
       return 0
     }
   }
@@ -659,8 +667,23 @@ struct HomePage: View {
 
   private var headerTitle: String {
     if session.isConnected {
-      return session.profile.isKnown ? session.profile.displayName : "Unsupported earbuds"
+      guard session.profile.isKnown else { return "Unsupported earbuds" }
+      if session.isActiveNameDuplicate,
+         let id = session.activeDeviceID,
+         let active = session.availableDevices.first(where: { $0.id == id })
+      {
+        return "\(session.profile.displayName) \(active.shortTag)"
+      }
+      if session.availableDevices.count > 1,
+         let btName = session.activeBluetoothName,
+         !btName.isEmpty,
+         btName.caseInsensitiveCompare(session.profile.displayName) != .orderedSame
+      {
+        return btName
+      }
+      return session.profile.displayName
     }
+    if case .selecting = session.connection { return "OpenBuds" }
     if session.connectionIssue == .bluetoothUnauthorized { return "OpenBuds" }
     return session.lastKnown?.name ?? session.pairedName ?? "OpenBuds"
   }
@@ -669,6 +692,7 @@ struct HomePage: View {
     guard !session.isConnected else { return nil }
     switch session.connection {
     case .searching: return (.accentColor, "Searching…")
+    case .selecting: return (.accentColor, "\(session.availableDevices.count) earbuds connected")
     case .connecting: return (.accentColor, "Linking…")
     case .unavailable:
       switch session.connectionIssue {
@@ -691,12 +715,75 @@ struct HomePage: View {
     }
   }
 
+  private func switcherMenuTitle(for candidate: ConnectedBudsDevice) -> String {
+    var parts = [session.displayLabel(for: candidate)]
+    if let snap = session.lastKnown(for: candidate.id), snap.hasBattery {
+      let levels = [
+        snap.left.map { "L \($0)%" },
+        snap.right.map { "R \($0)%" },
+      ].compactMap { $0 }
+      if !levels.isEmpty { parts.append(levels.joined(separator: " · ")) }
+    }
+    if !session.isDuplicateName(candidate),
+       let matched = audio.buds(named: candidate.name),
+       audio.current == matched
+    {
+      parts.append("Audio")
+    }
+    return parts.joined(separator: " — ")
+  }
+
   private var header: some View {
     HStack(spacing: 6) {
       VStack(alignment: .leading, spacing: 1) {
-        Text(headerTitle)
-          .font(.headline)
-          .lineLimit(1)
+        if session.isConnected, session.availableDevices.count > 1 {
+          Menu {
+            ForEach(session.availableDevices) { candidate in
+              Button {
+                Task { await session.selectDevice(candidate.id) }
+              } label: {
+                if candidate.id == session.activeDeviceID {
+                  Label(switcherMenuTitle(for: candidate), systemImage: "checkmark")
+                } else {
+                  Text(switcherMenuTitle(for: candidate))
+                }
+              }
+            }
+            Divider()
+            Button("Refresh connected earbuds") {
+              Task { await session.refreshAvailableDevices() }
+            }
+          } label: {
+            HStack(spacing: 5) {
+              Text(headerTitle)
+                .font(.headline)
+                .lineLimit(1)
+                .truncationMode(.tail)
+              HStack(spacing: 2) {
+                Text("\(session.availableDevices.count)")
+                  .monospacedDigit()
+                Image(systemName: "chevron.up.chevron.down")
+                  .font(.system(size: 8, weight: .bold))
+              }
+              .font(.caption2.weight(.semibold))
+              .foregroundStyle(Color.accentColor)
+              .padding(.horizontal, 5)
+              .padding(.vertical, 1.5)
+              .background(Color.accentColor.opacity(0.16), in: .capsule)
+              .overlay(Capsule().strokeBorder(Color.accentColor.opacity(0.32), lineWidth: 1))
+            }
+          }
+          .menuStyle(.button)
+          .buttonStyle(.plain)
+          .menuIndicator(.hidden)
+          .help("Switch between connected earbuds")
+          .accessibilityLabel("Switch earbuds, \(session.availableDevices.count) connected")
+        } else {
+          Text(headerTitle)
+            .font(.headline)
+            .lineLimit(1)
+            .truncationMode(.tail)
+        }
         if let subtitle {
           HStack(spacing: 5) {
             if session.profile.experimental, session.profile.isKnown {
@@ -729,16 +816,6 @@ struct HomePage: View {
       }
       Spacer(minLength: 4)
       if session.busy { ProgressView().controlSize(.small) }
-      if session.isConnected, session.unsupported == nil {
-        Button {
-          model.toggleHomeCompact(prefs: prefs, reduceMotion: reduceMotion)
-        } label: {
-          Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-        }
-        .buttonStyle(CircleIconButtonStyle(active: !isExpanded))
-        .help(isExpanded ? "Switch to compact view" : "Expand all controls")
-        .accessibilityLabel(isExpanded ? "Switch to compact view" : "Expand all controls")
-      }
       if session.isConnected {
         Button { session.disconnect() } label: {
           Image(systemName: "eject")
@@ -760,6 +837,7 @@ struct HomePage: View {
   private var subtitle: String? {
     guard session.isConnected else { return nil }
     var parts: [String] = []
+    if let wear = session.wearingSummary { parts.append(wear) }
     if let codec = session.codec.flatMap({ codecNames[$0] }) { parts.append(codec) }
     if let firmware = session.firmware, !firmware.isEmpty { parts.append("fw \(firmware)") }
     return parts.isEmpty ? "Connected" : parts.joined(separator: " · ")
@@ -941,13 +1019,180 @@ struct SetupStepRow: View {
   }
 }
 
+/// Multi-device picker shown when two or more earbuds with the control service are connected.
+struct DevicePickerCard: View {
+  let session: BudsSession
+  let audio: OutputAudio
+
+  private var hasAnyDuplicateNames: Bool {
+    session.availableDevices.contains { session.isDuplicateName($0) }
+  }
+
+  var body: some View {
+    PanelSection {
+      VStack(alignment: .leading, spacing: 0) {
+        HStack(alignment: .top, spacing: 10) {
+          IconBadge(icon: "airpods.pro", color: .accentColor)
+            .padding(.top, 1)
+          VStack(alignment: .leading, spacing: 2) {
+            Text("Choose earbuds")
+              .font(.callout.weight(.semibold))
+              .lineLimit(1)
+            Text("Select a connected pair to control. Switch anytime from the header.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          }
+          Spacer(minLength: 0)
+        }
+        .padding(.vertical, 10)
+
+        VStack(spacing: 6) {
+          ForEach(session.availableDevices) { device in
+            let duplicate = session.isDuplicateName(device)
+            let isAudio = !duplicate && audio.buds(named: device.name).map { audio.current == $0 } ?? false
+            DevicePickerRow(
+              device: device,
+              snapshot: session.lastKnown(for: device.id),
+              showShortTag: duplicate,
+              isAudioOutput: isAudio
+            ) {
+              Task { await session.selectDevice(device.id) }
+            }
+          }
+        }
+        .padding(.bottom, 10)
+
+        if hasAnyDuplicateNames {
+          Text("Both pairs share one Bluetooth name. OpenBuds separates them by ID; rename one in Bluetooth Settings to also split Mac audio.")
+            .font(.caption2)
+            .foregroundStyle(.orange)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.orange.opacity(0.12), in: .rect(cornerRadius: Metrics.control))
+            .overlay(RoundedRectangle(cornerRadius: Metrics.control).strokeBorder(Color.orange.opacity(0.28), lineWidth: 1))
+            .padding(.bottom, 10)
+        }
+
+        Divider()
+        HStack(spacing: 8) {
+          Button("Refresh") { Task { await session.connect() } }
+            .buttonStyle(PanelButtonStyle(variant: .tinted()))
+          Spacer(minLength: 4)
+          Button("Bluetooth") {
+            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.BluetoothSettings")!)
+          }
+          .buttonStyle(PanelButtonStyle(variant: .secondary))
+        }
+        .padding(.vertical, 8)
+      }
+    }
+  }
+}
+
+private struct DevicePickerRow: View {
+  let device: ConnectedBudsDevice
+  let snapshot: LastKnownBuds?
+  let showShortTag: Bool
+  let isAudioOutput: Bool
+  let action: () -> Void
+  @State private var hovering = false
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  private var detailLine: String {
+    var parts: [String] = []
+    if let snapshot {
+      if snapshot.name.caseInsensitiveCompare(device.name) != .orderedSame {
+        parts.append(snapshot.name)
+      }
+      let budLevels = [
+        snapshot.left.map { "L \($0)%" },
+        snapshot.right.map { "R \($0)%" },
+      ].compactMap { $0 }
+      if !budLevels.isEmpty {
+        parts.append(budLevels.joined(separator: " · "))
+      } else if let casePct = snapshot.chargingCase {
+        parts.append("Case \(casePct)%")
+      }
+      parts.append(relativeTime(snapshot.seenAt))
+    } else {
+      parts.append("Ready to connect")
+    }
+    return parts.joined(separator: " · ")
+  }
+
+  var body: some View {
+    Button(action: action) {
+      HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 2) {
+          HStack(spacing: 5) {
+            Text(device.name)
+              .font(.caption.weight(.semibold))
+              .foregroundStyle(.primary)
+              .lineLimit(1)
+              .truncationMode(.tail)
+            if showShortTag {
+              Text(device.shortTag)
+                .font(.caption2.monospaced().weight(.medium))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1)
+                .background(.fill.tertiary, in: .rect(cornerRadius: 5))
+            }
+            if isAudioOutput {
+              Text("Audio")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(Color.accentColor)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1)
+                .background(Color.accentColor.opacity(0.16), in: .capsule)
+            }
+          }
+          Text(detailLine)
+            .font(.caption2.monospacedDigit())
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.tail)
+        }
+        Spacer(minLength: 4)
+        HStack(spacing: 3) {
+          Text("Connect")
+            .font(.caption2.weight(.semibold))
+          Image(systemName: "chevron.right")
+            .font(.system(size: 9, weight: .semibold))
+        }
+        .foregroundStyle(Color.accentColor)
+      }
+      .padding(.horizontal, 10)
+      .padding(.vertical, 8)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(
+        hovering ? AnyShapeStyle(.fill.secondary) : AnyShapeStyle(.fill.tertiary),
+        in: .rect(cornerRadius: Metrics.banner)
+      )
+      .overlay(
+        RoundedRectangle(cornerRadius: Metrics.banner)
+          .strokeBorder(hovering ? Color.accentColor.opacity(0.45) : Color.primary.opacity(0.1), lineWidth: 1)
+      )
+      .contentShape(.rect(cornerRadius: Metrics.banner))
+    }
+    .buttonStyle(.plain)
+    .onHover { hovering = $0 }
+    .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovering)
+    .accessibilityLabel("Connect to \(showShortTag ? "\(device.name) \(device.shortTag)" : device.name), \(detailLine)")
+  }
+}
+
 struct VolumeSection: View {
   let session: BudsSession
   let audio: OutputAudio
 
   var body: some View {
-    let name: String? = if case .connected(let n) = session.connection { n } else { nil }
-    if let buds = audio.buds(named: name) {
+    let connectedName: String? = if case .connected(let n) = session.connection { n } else { nil }
+    let targetName = session.activeBluetoothName ?? connectedName
+    if let buds = audio.buds(named: targetName) {
       PanelSection {
         Group {
           if audio.current == buds, let volume = audio.volume {
@@ -967,6 +1212,19 @@ struct VolumeSection: View {
                 .buttonStyle(PanelButtonStyle(variant: .secondary))
             }
           }
+        }
+        .padding(.vertical, 8)
+      }
+    } else if session.isActiveNameDuplicate {
+      PanelSection {
+        HStack(spacing: 7) {
+          Image(systemName: "speaker.slash")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+          Text("Volume hidden while two earbuds share one Bluetooth name.")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.vertical, 8)
       }
@@ -1017,6 +1275,7 @@ struct NavTile: View {
   let value: String
   let action: () -> Void
   @State private var hovering = false
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
     Button(action: action) {
@@ -1036,7 +1295,8 @@ struct NavTile: View {
     }
     .buttonStyle(.plain)
     .onHover { hovering = $0 }
-    .animation(.easeOut(duration: 0.12), value: hovering)
+    .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovering)
+    .accessibilityLabel("\(title), \(value)")
   }
 }
 
@@ -1045,6 +1305,7 @@ struct HomeExpandBar: View {
   let expanded: Bool
   let action: () -> Void
   @State private var hovering = false
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
     Button(action: action) {
@@ -1068,12 +1329,13 @@ struct HomeExpandBar: View {
       .padding(.horizontal, 11)
       .padding(.vertical, 7)
       .frame(maxWidth: .infinity)
-      .background(hovering ? AnyShapeStyle(.fill.tertiary) : AnyShapeStyle(.fill.quaternary), in: .rect(cornerRadius: 11))
-      .contentShape(.rect(cornerRadius: 11))
+      .background(hovering ? AnyShapeStyle(.fill.tertiary) : AnyShapeStyle(.fill.quaternary), in: .rect(cornerRadius: Metrics.banner))
+      .contentShape(.rect(cornerRadius: Metrics.banner))
     }
     .buttonStyle(.plain)
     .onHover { hovering = $0 }
-    .animation(.easeOut(duration: 0.12), value: hovering)
+    .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovering)
+    .accessibilityLabel(expanded ? "Switch to compact view" : "Show more controls")
   }
 }
 
@@ -1083,6 +1345,7 @@ struct AboutFooter: View {
   let hasUpdate: Bool
   let action: () -> Void
   @State private var hovering = false
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
     Button(action: action) {
@@ -1110,12 +1373,12 @@ struct AboutFooter: View {
       }
       .padding(.horizontal, 8)
       .padding(.vertical, 5)
-      .background(hovering ? AnyShapeStyle(.fill.quaternary) : AnyShapeStyle(.clear), in: .rect(cornerRadius: 8))
-      .contentShape(.rect(cornerRadius: 8))
+      .background(hovering ? AnyShapeStyle(.fill.quaternary) : AnyShapeStyle(.clear), in: .rect(cornerRadius: Metrics.control))
+      .contentShape(.rect(cornerRadius: Metrics.control))
     }
     .buttonStyle(.plain)
     .onHover { hovering = $0 }
-    .animation(.easeOut(duration: 0.12), value: hovering)
+    .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovering)
   }
 }
 
