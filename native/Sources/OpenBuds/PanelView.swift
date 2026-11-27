@@ -11,70 +11,198 @@ final class PanelModel {
 
   private(set) var page: Page = .home
   private(set) var forward = true
+  private var history: [Page] = []
   var editing: Preset?
   var editingIsNew = false
   var ringing = false
   let updates = UpdateChecker()
 
   func open(_ next: Page) {
+    guard next != page else { return }
+    history.append(page)
     forward = true
     withAnimation(.snappy(duration: 0.18)) { page = next }
   }
 
   func back() {
+    let previous = history.popLast() ?? .home
     forward = false
-    withAnimation(.snappy(duration: 0.18)) { page = parent }
+    withAnimation(.snappy(duration: 0.18)) { page = previous }
   }
 
   func home() {
+    history.removeAll()
     forward = false
     page = .home
-  }
-
-  private var parent: Page {
-    switch page {
-    case .preset: .sound
-    case .hearing: .tools
-    default: .home
-    }
   }
 }
 
 enum Metrics {
-  static let width: CGFloat = 300
+  static let width: CGFloat = 320
   static let padding: CGFloat = 10
   static let section: CGFloat = 14
-  static let maxScroll: CGFloat = 480
+  static let maxScroll: CGFloat = 560
+}
+
+/// Unified capsule button style used across every page, card, and banner in OpenBuds.
+struct PanelButtonStyle: ButtonStyle {
+  enum Variant {
+    case prominent(Color = .accentColor)
+    case secondary
+    case tinted(Color = .accentColor)
+    case destructive
+  }
+
+  enum Size {
+    case regular
+    case mini
+  }
+
+  let variant: Variant
+  var size: Size = .regular
+  var fullWidth: Bool = false
+  @Environment(\.isEnabled) private var isEnabled
+
+  func makeBody(configuration: Configuration) -> some View {
+    PanelButtonBody(
+      configuration: configuration,
+      variant: variant,
+      size: size,
+      fullWidth: fullWidth,
+      isEnabled: isEnabled
+    )
+  }
+}
+
+private struct PanelButtonBody: View {
+  let configuration: ButtonStyle.Configuration
+  let variant: PanelButtonStyle.Variant
+  let size: PanelButtonStyle.Size
+  let fullWidth: Bool
+  let isEnabled: Bool
+  @State private var hovering = false
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  var body: some View {
+    configuration.label
+      .font(size == .mini ? .caption2.weight(.semibold) : .caption.weight(.semibold))
+      .lineLimit(1)
+      .frame(maxWidth: fullWidth ? .infinity : nil)
+      .padding(.horizontal, size == .mini ? 8 : 12)
+      .padding(.vertical, size == .mini ? 4 : 7)
+      .foregroundStyle(foregroundColor)
+      .background(backgroundStyle, in: Capsule(style: .circular))
+      .overlay(Capsule(style: .circular).strokeBorder(borderColor, lineWidth: 1))
+      .contentShape(Capsule(style: .circular))
+      .opacity(isEnabled ? (configuration.isPressed ? 0.85 : 1) : 0.45)
+      .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
+      .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovering)
+      .animation(reduceMotion ? nil : .easeOut(duration: 0.08), value: configuration.isPressed)
+      .onHover { hovering = $0 }
+  }
+
+  private var foregroundColor: Color {
+    switch variant {
+    case .prominent: .white
+    case .secondary: .primary
+    case .tinted(let tint): tint
+    case .destructive: .red
+    }
+  }
+
+  private var backgroundStyle: AnyShapeStyle {
+    switch variant {
+    case .prominent(let tint):
+      AnyShapeStyle(tint.opacity(hovering && isEnabled ? 0.9 : 1).gradient)
+    case .secondary:
+      AnyShapeStyle(hovering && isEnabled ? AnyShapeStyle(.fill.secondary) : AnyShapeStyle(.fill.tertiary))
+    case .tinted(let tint):
+      AnyShapeStyle(tint.opacity(hovering && isEnabled ? 0.22 : 0.14))
+    case .destructive:
+      AnyShapeStyle(Color.red.opacity(hovering && isEnabled ? 0.22 : 0.14))
+    }
+  }
+
+  private var borderColor: Color {
+    switch variant {
+    case .prominent: .clear
+    case .secondary: Color.primary.opacity(hovering && isEnabled ? 0.22 : 0.14)
+    case .tinted(let tint): tint.opacity(hovering && isEnabled ? 0.45 : 0.32)
+    case .destructive: Color.red.opacity(hovering && isEnabled ? 0.48 : 0.34)
+    }
+  }
+}
+
+/// Unified 24×24 circular icon button (Header Disconnect/Quit, SubPage Back, ConnectCard Close).
+struct CircleIconButtonStyle: ButtonStyle {
+  @Environment(\.isEnabled) private var isEnabled
+
+  func makeBody(configuration: Configuration) -> some View {
+    CircleIconButtonBody(configuration: configuration, isEnabled: isEnabled)
+  }
+}
+
+private struct CircleIconButtonBody: View {
+  let configuration: ButtonStyle.Configuration
+  let isEnabled: Bool
+  @State private var hovering = false
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  var body: some View {
+    configuration.label
+      .font(.system(size: 11, weight: .semibold))
+      .foregroundStyle(hovering && isEnabled ? .primary : .secondary)
+      .frame(width: 24, height: 24)
+      .background(hovering && isEnabled ? AnyShapeStyle(.fill.secondary) : AnyShapeStyle(.fill.tertiary), in: .circle)
+      .overlay(Circle().strokeBorder(Color.primary.opacity(hovering && isEnabled ? 0.22 : 0.12), lineWidth: 1))
+      .contentShape(.circle)
+      .opacity(isEnabled ? (configuration.isPressed ? 0.8 : 1) : 0.45)
+      .scaleEffect(configuration.isPressed && !reduceMotion ? 0.94 : 1)
+      .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovering)
+      .onHover { hovering = $0 }
+  }
 }
 
 struct PanelView: View {
   let session: BudsSession
   let audio: OutputAudio
   let prefs: AppPrefs
+  var showConnectCard: () -> Void = {}
   @State private var model = PanelModel()
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  private var displayedPage: PanelModel.Page {
+    if model.page == .about { return .about }
+    return session.isConnected ? model.page : .home
+  }
 
   var body: some View {
     ZStack(alignment: .top) {
       page
-        .id(session.isConnected ? model.page : .home)
-        .transition(.push(from: model.forward ? .trailing : .leading))
+        .id(displayedPage)
+        .transition(reduceMotion ? .opacity : .push(from: model.forward ? .trailing : .leading))
     }
     .frame(width: Metrics.width)
     .font(.callout)
     .clipped()
-    .onChange(of: session.isConnected) { _, connected in if !connected { model.home() } }
+    .onChange(of: session.isConnected) { _, connected in
+      if !connected {
+        model.ringing = false
+        if model.page != .about { model.home() }
+      }
+    }
   }
 
   @ViewBuilder private var page: some View {
-    switch session.isConnected ? model.page : .home {
+    switch displayedPage {
     case .home: HomePage(session: session, model: model, audio: audio)
     case .sound: SoundPage(session: session, model: model)
     case .controls: ControlsPage(session: session, model: model)
-    case .features: FeaturesPage(session: session, model: model, prefs: prefs)
+    case .features: FeaturesPage(session: session, model: model, prefs: prefs, showConnectCard: showConnectCard)
     case .tools: ToolsPage(session: session, model: model)
     case .preset: PresetPage(session: session, model: model)
     case .hearing: HearingPage(session: session, model: model)
-    case .about: AboutPage(model: model)
+    case .about: AboutPage(session: session, model: model)
     }
   }
 }
@@ -85,10 +213,14 @@ struct HomePage: View {
   let session: BudsSession
   let model: PanelModel
   let audio: OutputAudio
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       header.padding(.leading, 6).padding(.top, 2)
+      if session.isConnected, model.ringing {
+        ringingBanner
+      }
       switch session.connection {
       case .connected where session.unsupported != nil:
         UnsupportedCard(info: session.unsupported!)
@@ -96,6 +228,7 @@ struct HomePage: View {
         PanelSection { BatteryRow(session: session).padding(.vertical, 10) }
         PanelSection { NoiseControl(session: session).padding(.vertical, 9) }
         VolumeSection(session: session, audio: audio)
+        let hasTools = [0x0400, 0x0405, 0x040D].contains(where: { session.supports($0) })
         Grid(horizontalSpacing: 8, verticalSpacing: 8) {
           GridRow {
             NavTile(icon: "slider.vertical.3", color: .pink, title: "Sound", value: presetName ?? "Equalizer") { model.open(.sound) }
@@ -103,35 +236,261 @@ struct HomePage: View {
           }
           GridRow {
             NavTile(icon: "switch.2", color: .green, title: "Features", value: featureSummary) { model.open(.features) }
-            if [0x0400, 0x0405, 0x040D].contains(where: { session.supports($0) }) {
+              .gridCellColumns(hasTools ? 1 : 2)
+            if hasTools {
               NavTile(icon: "wrench.and.screwdriver.fill", color: .orange, title: "Tools", value: "Find and fit") { model.open(.tools) }
             }
           }
         }
-        AboutRow { model.open(.about) }
       case .connecting(let name):
-        ConnectionCard(title: "Connecting…", message: name, busy: true)
+        connectingView(title: "Linking \(name)", detail: "Opening the local control channel. Open the case lid or take one bud out.")
       case .searching:
-        ConnectionCard(title: "Looking for your earbuds", message: "This takes a moment.", busy: true)
+        connectingView(title: "Looking for earbuds", detail: "Checking paired Bluetooth devices on this Mac.")
       case .unavailable(let message):
-        ConnectionCard(title: "Not connected", message: message, busy: false) {
-          Button("Connect") { Task { await session.connect() } }
-            .buttonStyle(.glassProminent)
+        unavailableView(message: message)
+      }
+      if let error = session.lastError, session.isConnected {
+        HStack(alignment: .top, spacing: 6) {
+          Label(error, systemImage: "exclamationmark.triangle.fill")
+            .font(.caption)
+            .foregroundStyle(.orange)
+            .fixedSize(horizontal: false, vertical: true)
+          Spacer(minLength: 4)
+          Button("Dismiss", systemImage: "xmark") { session.clearError() }
+            .labelStyle(.iconOnly)
+            .buttonStyle(.plain)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .help("Dismiss error")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(Color.orange.opacity(0.12), in: .rect(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.orange.opacity(0.28), lineWidth: 1))
+      }
+      AboutFooter(connected: session.isConnected, hasUpdate: hasUpdate) { model.open(.about) }
+    }
+    .padding(Metrics.padding)
+    .background(alignment: .top) {
+      RadialGradient(
+        colors: [atmosphereTint.opacity(atmosphereStrength), atmosphereTint.opacity(atmosphereStrength * 0.28), .clear],
+        center: .top,
+        startRadius: 10,
+        endRadius: 190
+      )
+      .frame(height: 190)
+      .allowsHitTesting(false)
+      .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: atmosphereTint)
+    }
+  }
+
+  @ViewBuilder
+  private func connectingView(title: String, detail: String) -> some View {
+    if let last = session.lastKnown, last.hasBattery {
+      LastBatterySection(snapshot: last)
+    }
+    StandbyModule(
+      icon: "antenna.radiowaves.left.and.right",
+      color: .accentColor,
+      title: title,
+      detail: detail,
+      busy: true,
+      step: session.connectionStep.rawValue
+    )
+  }
+
+  @ViewBuilder
+  private func unavailableView(message: String) -> some View {
+    switch session.connectionIssue {
+    case .bluetoothUnauthorized:
+      StandbyModule(
+        icon: "lock.fill",
+        color: .orange,
+        title: "Bluetooth access needed",
+        detail: "macOS blocks Bluetooth accessory access until allowed. Everything runs 100% locally on your Mac."
+      )
+      PanelSection(title: "How to allow") {
+        SetupStepRow(step: .number(1), title: "Open Privacy & Security › Bluetooth")
+        Divider()
+        SetupStepRow(step: .number(2), title: "Turn on OpenBuds, then click Retry")
+      }
+      HStack(spacing: 8) {
+        Button("Open Privacy Settings") {
+          NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Bluetooth")!)
+        }
+        .buttonStyle(PanelButtonStyle(variant: .prominent(), fullWidth: true))
+        Button("Retry") { Task { await session.connect() } }
+          .buttonStyle(PanelButtonStyle(variant: .secondary))
+      }
+
+    case .bluetoothOff:
+      if let last = session.lastKnown, last.hasBattery {
+        LastBatterySection(snapshot: last)
+      }
+      StandbyModule(
+        icon: "antenna.radiowaves.left.and.right.slash",
+        color: .orange,
+        title: "Bluetooth is turned off",
+        detail: "Turn Bluetooth on in macOS to talk to your earbuds."
+      ) {
+        Button("Bluetooth Settings") {
+          NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.BluetoothSettings")!)
+        }
+        .buttonStyle(PanelButtonStyle(variant: .prominent()))
+        Spacer(minLength: 4)
+        Button("Retry") { Task { await session.connect() } }
+          .buttonStyle(PanelButtonStyle(variant: .secondary))
+      }
+
+    case .retrying:
+      if let last = session.lastKnown, last.hasBattery {
+        LastBatterySection(snapshot: last)
+      }
+      StandbyModule(
+        icon: "antenna.radiowaves.left.and.right",
+        color: .accentColor,
+        title: "Waiting for control link",
+        detail: "Open the case lid or take one bud out. Retrying automatically every 5s.",
+        busy: true,
+        step: session.connectionStep.rawValue
+      ) {
+        Button("Try Now") { Task { await session.connect() } }
+          .buttonStyle(PanelButtonStyle(variant: .prominent()))
+        Spacer(minLength: 4)
+        Button("Bluetooth") {
+          NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.BluetoothSettings")!)
+        }
+        .buttonStyle(PanelButtonStyle(variant: .secondary))
+      }
+
+    case .none, .generic:
+      if session.pausedByUser {
+        if let last = session.lastKnown, last.hasBattery {
+          LastBatterySection(snapshot: last)
+        }
+        StandbyModule(
+          icon: "pause.fill",
+          color: .blue,
+          title: "Control link paused",
+          detail: session.pairedAudioConnected
+            ? "Audio stays connected on this Mac. Reconnect anytime to adjust settings."
+            : "Auto-reconnect is paused until you reconnect."
+        ) {
+          Button("Reconnect") { Task { await session.connect() } }
+            .buttonStyle(PanelButtonStyle(variant: .prominent()))
+          Spacer(minLength: 4)
+          Button("Bluetooth") {
+            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.BluetoothSettings")!)
+          }
+          .buttonStyle(PanelButtonStyle(variant: .secondary))
+        }
+      } else if session.lastKnown != nil || session.pairedName != nil {
+        if let last = session.lastKnown, last.hasBattery {
+          LastBatterySection(snapshot: last)
+        }
+        StandbyModule(
+          icon: "airpods.pro.chargingcase.wireless.fill",
+          color: .gray,
+          title: "Waiting for earbuds",
+          detail: session.connectionIssue == .generic
+            ? message
+            : "Open the case lid or take one bud out — OpenBuds links automatically."
+        ) {
+          Button("Check Now") { Task { await session.connect() } }
+            .buttonStyle(PanelButtonStyle(variant: .tinted()))
+          Spacer(minLength: 4)
+          Button("Bluetooth") {
+            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.BluetoothSettings")!)
+          }
+          .buttonStyle(PanelButtonStyle(variant: .secondary))
+        }
+      } else {
+        StandbyModule(
+          icon: "airpods.pro",
+          color: .accentColor,
+          title: "Connect OnePlus earbuds",
+          detail: "Native battery, noise control, and EQ — 100% local, zero accounts."
+        )
+        PanelSection(title: "Setup") {
+          SetupStepRow(step: .done, title: "OpenBuds ready", detail: "Listening locally on this Mac")
+          Divider()
+          SetupStepRow(step: .number(1), title: "Pair earbuds in Bluetooth Settings", detail: "Hold the case button 2s until the white light pulses.")
+          Divider()
+          SetupStepRow(step: .number(2), title: "Auto-connects once paired", detail: "Controls appear as soon as the earbuds link.")
+        }
+        HStack(spacing: 8) {
           Button("Bluetooth Settings") {
             NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.BluetoothSettings")!)
           }
-          .buttonStyle(.glass)
+          .buttonStyle(PanelButtonStyle(variant: .prominent(), fullWidth: true))
+          Button("Check") { Task { await session.connect() } }
+            .buttonStyle(PanelButtonStyle(variant: .secondary))
         }
       }
-      if let error = session.lastError, session.isConnected {
-        Label(error, systemImage: "exclamationmark.triangle.fill")
-          .font(.caption)
-          .foregroundStyle(.orange)
-          .fixedSize(horizontal: false, vertical: true)
-          .padding(.horizontal, 6)
+    }
+  }
+
+  private var ringingBanner: some View {
+    HStack(spacing: 8) {
+      Image(systemName: "dot.radiowaves.left.and.right")
+        .font(.callout.weight(.semibold))
+        .foregroundStyle(.red)
+        .symbolEffect(.pulse, isActive: !reduceMotion)
+      VStack(alignment: .leading, spacing: 1) {
+        Text("Earbuds ringing").font(.caption.weight(.semibold))
+        Text("Playing loud tone").font(.caption2).foregroundStyle(.secondary)
+      }
+      Spacer(minLength: 4)
+      Button("Stop") {
+        Task { if await session.findEarbuds(false) { model.ringing = false } }
+      }
+      .buttonStyle(PanelButtonStyle(variant: .prominent(.red)))
+      .disabled(session.busy)
+    }
+    .padding(.horizontal, 10)
+    .padding(.vertical, 8)
+    .background(Color.red.opacity(0.16), in: .rect(cornerRadius: 12))
+    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.red.opacity(0.38), lineWidth: 1))
+    .transition(.opacity)
+  }
+
+  private var atmosphereTint: Color {
+    if session.isConnected {
+      if session.unsupported != nil { return .indigo }
+      guard let mode = session.noise?.mode else { return .clear }
+      if mode.isANC { return .indigo }
+      switch mode {
+      case .adaptive: return .teal
+      case .transparency: return .accentColor
+      default: return .clear
       }
     }
-    .padding(Metrics.padding)
+    switch session.connection {
+    case .searching, .connecting: return .accentColor
+    case .unavailable:
+      switch session.connectionIssue {
+      case .bluetoothUnauthorized, .bluetoothOff: return .orange
+      case .retrying: return .accentColor
+      case .none, .generic: return .clear
+      }
+    case .connected: return .clear
+    }
+  }
+
+  private var atmosphereStrength: Double {
+    if session.isConnected { return session.unsupported != nil ? 0.16 : 0.22 }
+    switch session.connectionIssue {
+    case .bluetoothUnauthorized, .bluetoothOff: return 0.15
+    case .retrying: return 0.14
+    case .none, .generic:
+      if case .searching = session.connection { return 0.14 }
+      if case .connecting = session.connection { return 0.14 }
+      return 0
+    }
+  }
+
+  private var hasUpdate: Bool {
+    if case .available = model.updates.state { true } else { false }
   }
 
   private var presetName: String? {
@@ -143,101 +502,277 @@ struct HomePage: View {
     return on == 0 ? "All off" : "\(on) on"
   }
 
+  private var headerTitle: String {
+    if session.isConnected {
+      return session.profile.isKnown ? session.profile.displayName : "Unsupported earbuds"
+    }
+    if session.connectionIssue == .bluetoothUnauthorized { return "OpenBuds" }
+    return session.lastKnown?.name ?? session.pairedName ?? "OpenBuds"
+  }
+
+  private var headerStatus: (dot: Color, text: String)? {
+    guard !session.isConnected else { return nil }
+    switch session.connection {
+    case .searching: return (.accentColor, "Searching…")
+    case .connecting: return (.accentColor, "Linking…")
+    case .unavailable:
+      switch session.connectionIssue {
+      case .bluetoothUnauthorized: return (.orange, "Permission needed")
+      case .bluetoothOff: return (.orange, "Bluetooth off")
+      case .retrying: return (.accentColor, "Waiting for control link")
+      case .none, .generic:
+        if session.pausedByUser {
+          return (.secondary, session.pairedAudioConnected ? "Paused · Audio on Mac" : "Disconnected")
+        }
+        if let seen = session.lastKnown?.seenAt {
+          return (.secondary, "In the case · \(relativeTime(seen))")
+        }
+        if session.pairedName != nil {
+          return (.secondary, "In the case · Auto-connect")
+        }
+        return (.secondary, "No earbuds paired")
+      }
+    case .connected: return nil
+    }
+  }
+
   private var header: some View {
-    HStack(spacing: 8) {
+    HStack(spacing: 6) {
       VStack(alignment: .leading, spacing: 1) {
-        HStack(spacing: 6) {
-          Text(session.isConnected ? (session.profile.isKnown ? session.profile.displayName : "Unsupported earbuds") : "OpenBuds")
-            .font(.headline)
-          if session.isConnected, session.profile.experimental, session.profile.isKnown {
-            Text("Experimental")
-              .font(.caption2.weight(.medium))
-              .padding(.horizontal, 6)
-              .padding(.vertical, 2)
-              .background(.orange.opacity(0.2), in: .capsule)
-              .foregroundStyle(.orange)
+        Text(headerTitle)
+          .font(.headline)
+          .lineLimit(1)
+        if let subtitle {
+          HStack(spacing: 5) {
+            if session.profile.experimental, session.profile.isKnown {
+              Text("Experimental")
+                .font(.caption2.weight(.semibold))
+                .lineLimit(1)
+                .fixedSize()
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1.5)
+                .background(.orange.opacity(0.2), in: .capsule)
+                .foregroundStyle(.orange)
+            }
+            Text(subtitle)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .lineLimit(1)
+              .truncationMode(.tail)
+          }
+        } else if let status = headerStatus {
+          HStack(spacing: 5) {
+            Circle()
+              .fill(status.dot)
+              .frame(width: 6, height: 6)
+            Text(status.text)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .lineLimit(1)
           }
         }
-        if let subtitle { Text(subtitle).font(.caption).foregroundStyle(.secondary) }
       }
-      Spacer()
+      Spacer(minLength: 4)
       if session.busy { ProgressView().controlSize(.small) }
       if session.isConnected {
-        Toggle("Connected", isOn: Binding(get: { session.isConnected }, set: { if !$0 { session.disconnect() } }))
-          .labelsHidden()
-          .toggleStyle(.switch)
-          .controlSize(.mini)
-          .help("Disconnect from the earbuds")
+        Button { session.disconnect() } label: {
+          Image(systemName: "eject")
+        }
+        .buttonStyle(CircleIconButtonStyle())
+        .help("Disconnect from the earbuds")
+        .accessibilityLabel("Disconnect from the earbuds")
       }
-      Button("Quit OpenBuds", systemImage: "power") { NSApplication.shared.terminate(nil) }
-        .labelStyle(.iconOnly)
-        .buttonStyle(.glass)
-        .buttonBorderShape(.circle)
-        .controlSize(.small)
-        .help("Quit OpenBuds")
-        .keyboardShortcut("q")
+      Button { NSApplication.shared.terminate(nil) } label: {
+        Image(systemName: "power")
+      }
+      .buttonStyle(CircleIconButtonStyle())
+      .help("Quit OpenBuds")
+      .accessibilityLabel("Quit OpenBuds")
+      .keyboardShortcut("q")
     }
   }
 
   private var subtitle: String? {
     guard session.isConnected else { return nil }
-    if let codec = session.codec.flatMap({ codecNames[$0] }) { return "Connected with \(codec)" }
-    return "Connected"
+    var parts: [String] = []
+    if let codec = session.codec.flatMap({ codecNames[$0] }) { parts.append(codec) }
+    if let firmware = session.firmware, !firmware.isEmpty { parts.append("fw \(firmware)") }
+    return parts.isEmpty ? "Connected" : parts.joined(separator: " · ")
   }
 }
 
-/// The panel when there is nothing to control yet: what is happening and what to do.
-struct ConnectionCard<Actions: View>: View {
-  let title: String
-  let message: String
-  let busy: Bool
-  @ViewBuilder var actions: Actions
+/// Compact relative time string for last-known standby readings ("Just now", "4m ago", "2h ago").
+func relativeTime(_ date: Date, now: Date = Date()) -> String {
+  let seconds = max(0, Int(now.timeIntervalSince(date)))
+  if seconds < 45 { return "Just now" }
+  let minutes = seconds / 60
+  if minutes < 60 { return "\(minutes)m ago" }
+  let hours = minutes / 60
+  if hours < 24 { return "\(hours)h ago" }
+  let days = hours / 24
+  return days == 1 ? "Yesterday" : "\(days)d ago"
+}
+
+/// Muted last-seen battery module shown while earbuds are in the case or paused, preserving continuity.
+struct LastBatterySection: View {
+  let snapshot: LastKnownBuds
 
   var body: some View {
-    VStack(spacing: 12) {
-      ZStack {
-        Image(systemName: "airpods.pro")
-          .font(.system(size: 24, weight: .regular))
-          .foregroundStyle(busy ? .secondary : .primary)
-          .symbolEffect(.pulse, isActive: busy)
-          .frame(width: 60, height: 60)
-          .glassEffect(.regular, in: .circle)
-        if busy {
-          TimelineView(.animation) { context in
-            let turn = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.1) / 1.1
-            Circle()
-              .trim(from: 0, to: 0.3)
-              .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-              .rotationEffect(.degrees(turn * 360))
+    PanelSection {
+      VStack(alignment: .leading, spacing: 8) {
+        HStack(alignment: .firstTextBaseline) {
+          Text("Last battery")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+          Spacer(minLength: 4)
+          Text(relativeTime(snapshot.seenAt))
+            .font(.caption2.monospacedDigit())
+            .foregroundStyle(.tertiary)
+        }
+        HStack(spacing: 0) {
+          ForEach(Part.allCases, id: \.self) { part in
+            BatteryGauge(part: part, level: snapshot.level(for: part), wear: nil, muted: true)
+              .frame(maxWidth: .infinity)
           }
-          .frame(width: 68, height: 68)
-          .transition(.opacity)
         }
       }
-      .frame(width: 70, height: 70)
-      .animation(.easeOut(duration: 0.2), value: busy)
-      .padding(.top, 6)
-      VStack(spacing: 4) {
-        Text(title).font(.headline)
-        Text(message)
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .multilineTextAlignment(.center)
-          .fixedSize(horizontal: false, vertical: true)
-      }
-      .padding(.horizontal, 12)
-      HStack(spacing: 8) { actions }
-        .controlSize(.small)
+      .padding(.vertical, 10)
     }
-    .frame(maxWidth: .infinity)
-    .padding(.vertical, 14)
-    .background(.fill.quaternary, in: .rect(cornerRadius: Metrics.section))
   }
 }
 
-extension ConnectionCard where Actions == EmptyView {
-  init(title: String, message: String, busy: Bool) {
-    self.init(title: title, message: message, busy: busy) { EmptyView() }
+/// Native Control Center–aligned status/recovery module used for standby, linking, and permission states.
+struct StandbyModule<Actions: View>: View {
+  let icon: String
+  let color: Color
+  let title: String
+  let detail: String
+  var busy: Bool = false
+  var step: Int? = nil
+  @ViewBuilder var actions: Actions
+
+  private static var steps: [(Int, String)] {
+    [(1, "1. Paired"), (2, "2. Link"), (3, "3. Sync")]
+  }
+
+  var body: some View {
+    PanelSection {
+      VStack(alignment: .leading, spacing: 0) {
+        HStack(alignment: .top, spacing: 10) {
+          IconBadge(icon: icon, color: color)
+            .padding(.top, 1)
+          VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+              .font(.callout.weight(.semibold))
+              .lineLimit(1)
+            Text(detail)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          }
+          Spacer(minLength: 4)
+          if busy {
+            ProgressView()
+              .controlSize(.small)
+              .padding(.top, 2)
+          }
+        }
+        .padding(.vertical, 10)
+
+        if let step {
+          HStack(spacing: 5) {
+            ForEach(Self.steps, id: \.0) { index, label in
+              let done = index < step
+              let active = index == step
+              Text(done ? "\(label) ✓" : label)
+                .font(.caption2.weight(active ? .semibold : .medium))
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 4.5)
+                .padding(.horizontal, 4)
+                .foregroundStyle(done ? AnyShapeStyle(Color.green) : active ? AnyShapeStyle(Color.primary) : AnyShapeStyle(.tertiary))
+                .background(
+                  done ? AnyShapeStyle(Color.green.opacity(0.14))
+                    : active ? AnyShapeStyle(Color.accentColor.opacity(0.22))
+                    : AnyShapeStyle(.fill.tertiary),
+                  in: .rect(cornerRadius: 8)
+                )
+                .overlay(
+                  RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(
+                      done ? Color.green.opacity(0.28)
+                        : active ? Color.accentColor.opacity(0.45)
+                        : Color.primary.opacity(0.06),
+                      lineWidth: 1
+                    )
+                )
+            }
+          }
+          .padding(.bottom, 10)
+        }
+
+        if Actions.self != EmptyView.self {
+          Divider()
+          HStack(spacing: 8) { actions }
+            .padding(.vertical, 8)
+        }
+      }
+    }
+  }
+}
+
+extension StandbyModule where Actions == EmptyView {
+  init(icon: String, color: Color, title: String, detail: String, busy: Bool = false, step: Int? = nil) {
+    self.init(icon: icon, color: color, title: title, detail: detail, busy: busy, step: step) { EmptyView() }
+  }
+}
+
+/// Numbered or completed row inside a setup / recovery PanelSection.
+struct SetupStepRow: View {
+  enum Marker {
+    case number(Int)
+    case done
+  }
+
+  let step: Marker
+  let title: String
+  var detail: String? = nil
+
+  var body: some View {
+    HStack(alignment: detail == nil ? .center : .top, spacing: 9) {
+      Group {
+        switch step {
+        case .done:
+          Image(systemName: "checkmark")
+            .font(.system(size: 9, weight: .bold))
+            .foregroundStyle(.white)
+            .frame(width: 18, height: 18)
+            .background(Color.green.gradient, in: .circle)
+        case .number(let n):
+          Text("\(n)")
+            .font(.caption2.weight(.semibold).monospacedDigit())
+            .foregroundStyle(.secondary)
+            .frame(width: 18, height: 18)
+            .background(.fill.tertiary, in: .circle)
+            .overlay(Circle().strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))
+        }
+      }
+      .padding(.top, detail == nil ? 0 : 1)
+      VStack(alignment: .leading, spacing: 1) {
+        Text(title)
+          .font(.caption.weight(.medium))
+          .fixedSize(horizontal: false, vertical: true)
+        if let detail {
+          Text(detail)
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+      }
+      Spacer(minLength: 0)
+    }
+    .padding(.vertical, 8)
   }
 }
 
@@ -263,7 +798,8 @@ struct VolumeSection: View {
               Text("Playing on \(audio.current?.name ?? "another output")")
                 .font(.caption).foregroundStyle(.secondary).lineLimit(1)
               Spacer()
-              Button("Use Buds") { audio.makeDefault(buds) }.buttonStyle(.glass).controlSize(.small)
+              Button("Use Buds") { audio.makeDefault(buds) }
+                .buttonStyle(PanelButtonStyle(variant: .secondary))
             }
           }
         }
@@ -339,32 +875,41 @@ struct NavTile: View {
   }
 }
 
-/// Full-width row under the four home tiles. Opens the About page.
-struct AboutRow: View {
+/// Slim footer rendered in every HomePage state. Opens the About page.
+struct AboutFooter: View {
+  let connected: Bool
+  let hasUpdate: Bool
   let action: () -> Void
   @State private var hovering = false
 
   var body: some View {
     Button(action: action) {
-      HStack(spacing: 8) {
-        GitHubBadge()
-        VStack(alignment: .leading, spacing: 0) {
-          Text("About OpenBuds").font(.callout.weight(.medium))
-          Text("Version \(AppInfo.version) · Open source on GitHub")
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
+      HStack(spacing: 6) {
+        Text(connected
+          ? "OpenBuds \(AppInfo.version) · Local & GPL-3.0"
+          : "OpenBuds \(AppInfo.version) · Report a problem")
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+        Spacer(minLength: 4)
+        HStack(spacing: 4) {
+          if hasUpdate {
+            Circle()
+              .fill(Color.accentColor)
+              .frame(width: 6, height: 6)
+              .accessibilityLabel("Update available")
+          }
+          Text("About")
+            .font(.caption2.weight(.medium))
+          Image(systemName: "chevron.right")
+            .font(.system(size: 9, weight: .semibold))
         }
-        Spacer(minLength: 0)
-        Image(systemName: "chevron.right")
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(.tertiary)
+        .foregroundStyle(hovering ? .primary : .secondary)
       }
-      .padding(.horizontal, 10)
-      .padding(.vertical, 9)
-      .frame(maxWidth: .infinity)
-      .background(hovering ? AnyShapeStyle(.fill.tertiary) : AnyShapeStyle(.fill.quaternary), in: .rect(cornerRadius: Metrics.section))
-      .contentShape(.rect(cornerRadius: Metrics.section))
+      .padding(.horizontal, 8)
+      .padding(.vertical, 5)
+      .background(hovering ? AnyShapeStyle(.fill.quaternary) : AnyShapeStyle(.clear), in: .rect(cornerRadius: 8))
+      .contentShape(.rect(cornerRadius: 8))
     }
     .buttonStyle(.plain)
     .onHover { hovering = $0 }
@@ -400,27 +945,40 @@ struct ToggleRow: View {
 struct StatusLine: View {
   let session: BudsSession
   let key: String
+  var inline = false
 
   var body: some View {
     if let status = session.status[key] {
       Group {
         switch status {
         case .pending:
-          HStack(spacing: 6) {
+          HStack(spacing: inline ? 4 : 6) {
             ProgressView().controlSize(.mini)
-            Text("Waiting for the earbuds…")
+            Text(inline ? "Confirming…" : "Waiting for the earbuds…")
+              .lineLimit(inline ? 1 : nil)
           }
           .foregroundStyle(.secondary)
         case .done(let text):
-          Label(text ?? "Confirmed", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+          Label(text ?? "Confirmed", systemImage: "checkmark.circle.fill")
+            .foregroundStyle(.green)
+            .contentTransition(.symbolEffect(.replace))
+            .lineLimit(inline ? 1 : nil)
         case .failed(let message):
-          Label(message, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-            .fixedSize(horizontal: false, vertical: true)
+          Label(message, systemImage: "exclamationmark.triangle.fill")
+            .foregroundStyle(.orange)
+            .contentTransition(.symbolEffect(.replace))
+            .lineLimit(inline ? 1 : nil)
+            .fixedSize(horizontal: false, vertical: !inline)
         }
       }
-      .font(.caption)
-      .padding(.bottom, 7)
+      .font(inline ? .caption2 : .caption)
+      .padding(.bottom, inline ? 0 : 7)
       .transition(.opacity)
+      .onChange(of: session.status[key]) { _, next in
+        if case .done = next {
+          NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+        }
+      }
     }
   }
 }
@@ -442,11 +1000,10 @@ struct SubPage<Content: View>: View {
             onBack?()
             model.back()
           } label: {
-            Image(systemName: "chevron.left").font(.callout.weight(.semibold)).frame(width: 14, height: 14)
+            Image(systemName: "chevron.left")
           }
-          .buttonStyle(.glass)
-          .buttonBorderShape(.circle)
-          .controlSize(.small)
+          .buttonStyle(CircleIconButtonStyle())
+          .accessibilityLabel("Back")
           .keyboardShortcut(.cancelAction)
           Spacer()
         }
@@ -485,8 +1042,11 @@ struct BatteryGauge: View {
   let part: Part
   let level: BatteryLevel?
   let wear: WearState?
+  var muted: Bool = false
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
+    let status = statusInfo
     VStack(spacing: 5) {
       ZStack {
         Circle().stroke(.fill.tertiary, lineWidth: 3.5)
@@ -494,18 +1054,43 @@ struct BatteryGauge: View {
           .trim(from: 0, to: Double(level?.percent ?? 0) / 100)
           .stroke(tint, style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
           .rotationEffect(.degrees(-90))
-          .animation(.smooth, value: level?.percent)
+          .animation(reduceMotion ? nil : .smooth, value: level?.percent)
         Image(systemName: symbol)
           .font(.system(size: 14))
-          .foregroundStyle(level?.percent == nil ? .tertiary : .primary)
+          .foregroundStyle(muted ? AnyShapeStyle(.secondary) : level?.percent == nil ? AnyShapeStyle(.tertiary) : isLow ? AnyShapeStyle(Color.red) : AnyShapeStyle(.primary))
       }
       .frame(width: 40, height: 40)
       HStack(spacing: 2) {
-        if level?.charging == true { Image(systemName: "bolt.fill").font(.caption2).foregroundStyle(.green) }
-        Text(level?.percent.map { "\($0)%" } ?? "–").font(.caption.weight(.medium).monospacedDigit())
+        if !muted, level?.charging == true {
+          Image(systemName: "bolt.fill")
+            .font(.caption2)
+            .foregroundStyle(.green)
+        }
+        Text(level?.percent.map { "\($0)%" } ?? "–")
+          .font(.caption.weight(.semibold).monospacedDigit())
+          .foregroundStyle(muted ? AnyShapeStyle(.secondary) : isLow ? AnyShapeStyle(Color.red) : level?.percent == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+          .contentTransition(.numericText())
       }
-      Text(note).font(.caption2).foregroundStyle(.secondary)
+      HStack(spacing: 4) {
+        if let dot = status.dot {
+          Circle()
+            .fill(dot)
+            .frame(width: 5, height: 5)
+        }
+        Text(status.label)
+          .font(.caption2)
+          .foregroundStyle(status.textColor)
+          .lineLimit(1)
+      }
     }
+    .opacity(muted ? 0.72 : 1)
+    .accessibilityElement(children: .combine)
+    .accessibilityLabel(accessibilitySummary(status.label))
+  }
+
+  private var isLow: Bool {
+    guard !muted, let level, let percent = level.percent, !level.charging else { return false }
+    return percent <= 15
   }
 
   private var symbol: String {
@@ -518,17 +1103,31 @@ struct BatteryGauge: View {
 
   private var tint: Color {
     guard let level, let percent = level.percent else { return .clear }
+    if muted { return .secondary.opacity(0.6) }
     if level.charging { return .green }
     return percent <= 15 ? .red : .primary
   }
-  private var note: String {
+
+  private var statusInfo: (dot: Color?, label: String, textColor: Color) {
+    if muted { return (nil, part.label, .secondary) }
     if part == .chargingCase {
+      if level?.charging == true { return (.green, "Charging", .green) }
+      if isLow { return (.red, "Low", .red) }
       // The case reports its battery only with the lid open and a bud inside.
-      if level?.percent != nil { return "Case" }
-      return wear?.lidOpen == true ? "Put a bud in" : "Open the lid"
+      if level?.percent != nil { return (nil, "Case", .secondary) }
+      return (nil, wear?.lidOpen == true ? "Put a bud in" : "Open lid", .secondary)
     }
-    guard let wear else { return part.label }
-    return wear.inEar ? "\(part.label), in ear" : wear.inCase ? "\(part.label), in case" : part.label
+    if level?.charging == true { return (.green, "Charging", .green) }
+    if isLow { return (.red, "Low", .red) }
+    if wear?.inEar == true { return (.green, "In ear", .secondary) }
+    if wear?.inCase == true { return (Color.secondary.opacity(0.6), "In case", .secondary) }
+    return (nil, part.label, .secondary)
+  }
+
+  private func accessibilitySummary(_ statusLabel: String) -> String {
+    let pct = level?.percent.map { "\($0) percent" } ?? "unavailable"
+    let base = statusLabel == part.label ? "\(part.label), \(pct)" : "\(part.label), \(pct), \(statusLabel)"
+    return muted ? "Last known \(base)" : base
   }
 }
 
@@ -538,22 +1137,48 @@ struct UnsupportedCard: View {
   @State private var copied = false
 
   var body: some View {
-    ConnectionCard(
-      title: "Unsupported model \(info.productId)",
-      message: "Firmware \(info.firmware ?? "unknown"). OpenBuds doesn’t know these earbuds yet, so it only reads them. Copy the diagnostics and attach them to a GitHub issue; they contain no personal data.",
-      busy: false
-    ) {
-      Button(copied ? "Copied" : "Copy diagnostics") {
+    StandbyModule(
+      icon: "shield.lefthalf.filled",
+      color: .indigo,
+      title: "Safe read-only mode",
+      detail: "No profile for this model yet — nothing is changed on your earbuds."
+    )
+    PanelSection(title: "Device identity") {
+      identityRow("Model ID", value: info.productId, monospaced: true)
+      Divider()
+      identityRow("Firmware", value: info.firmware ?? "Unknown", monospaced: true)
+      Divider()
+      identityRow("Report data", value: "Protocol bytes only", valueColor: .green)
+    }
+    HStack(spacing: 8) {
+      Button(copied ? "Copied ✓" : "Copy diagnostics") {
         NSPasteboard.general.clearContents()
         copied = NSPasteboard.general.setString(info.report, forType: .string)
       }
-      .buttonStyle(.glassProminent)
+      .buttonStyle(PanelButtonStyle(variant: .prominent(.indigo), fullWidth: true))
+      Button("GitHub issue ↗") {
+        NSWorkspace.shared.open(AppInfo.issues)
+      }
+      .buttonStyle(PanelButtonStyle(variant: .secondary))
     }
+  }
+
+  private func identityRow(_ label: String, value: String, monospaced: Bool = false, valueColor: Color = .secondary) -> some View {
+    HStack {
+      Text(label).font(.caption)
+      Spacer(minLength: 8)
+      Text(value)
+        .font(monospaced ? .caption.monospacedDigit() : .caption)
+        .foregroundStyle(valueColor)
+        .lineLimit(1)
+    }
+    .padding(.vertical, 7)
   }
 }
 
 struct NoiseControl: View {
   let session: BudsSession
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   private enum Group: CaseIterable {
     case anc, adaptive, transparency, off
@@ -588,6 +1213,14 @@ struct NoiseControl: View {
       case .off: "circle.slash"
       }
     }
+    var tint: Color? {
+      switch self {
+      case .anc: .indigo
+      case .adaptive: .teal
+      case .transparency: .accentColor
+      case .off: nil
+      }
+    }
   }
 
   private var current: Group? {
@@ -598,7 +1231,11 @@ struct NoiseControl: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
-      Text("Noise Control").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+      HStack(alignment: .firstTextBaseline, spacing: 6) {
+        Text("Noise Control").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+        Spacer(minLength: 4)
+        StatusLine(session: session, key: "noise", inline: true)
+      }
       HStack(alignment: .top, spacing: 4) {
         ForEach(Group.allCases.filter { $0.offered(by: session.profile.noiseModes) }, id: \.self) { group in
           let selected = current == group
@@ -606,14 +1243,11 @@ struct NoiseControl: View {
             guard !selected else { return }
             Task { await session.setNoise(group.mode) }
           } label: {
-            VStack(spacing: 7) {
-              Image(systemName: group.symbol)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(selected ? Color.white : Color.primary)
-                .frame(width: 36, height: 36)
-                .glassEffect(selected ? .regular.tint(.accentColor) : .regular, in: .circle)
+            VStack(spacing: 6) {
+              modeBadge(for: group, selected: selected)
               Text(group.title)
-                .font(.caption2)
+                .font(.caption2.weight(selected ? .medium : .regular))
+                .foregroundStyle(selected ? .primary : .secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
             }
@@ -632,15 +1266,49 @@ struct NoiseControl: View {
             set: { mode in if mode != session.noise?.mode { Task { await session.setNoise(mode) } } }
           ),
           options: NoiseMode.ancLevels.filter { session.profile.noiseModes.contains($0) },
-          compact: true
+          compact: true,
+          tint: .indigo
         ) { $0.rawValue.capitalized }
         .disabled(session.busy)
         if session.noise?.mode == .smart, let level = session.smartLevel, level != .smart {
-          Text("Smart is using \(level.rawValue) right now.").font(.caption).foregroundStyle(.secondary)
+          Text("Smart is using \(Text(level.rawValue).bold()) right now.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
       }
-      StatusLine(session: session, key: "noise")
     }
-    .animation(.smooth, value: current)
+    .animation(reduceMotion ? nil : .smooth, value: current)
+  }
+
+  @ViewBuilder
+  private func modeBadge(for group: Group, selected: Bool) -> some View {
+    let icon = Image(systemName: group.symbol)
+      .font(.system(size: 13, weight: .medium))
+      .contentTransition(.symbolEffect(.replace))
+      .symbolEffect(.bounce, value: reduceMotion ? false : selected)
+      .frame(width: 36, height: 36)
+
+    if selected, let tint = group.tint {
+      ZStack {
+        Circle()
+          .stroke(tint.opacity(0.32), lineWidth: 3)
+          .frame(width: 40, height: 40)
+        icon
+          .foregroundStyle(.white)
+          .background(tint.gradient, in: .circle)
+      }
+      .frame(width: 40, height: 40)
+    } else if selected {
+      icon
+        .foregroundStyle(.primary)
+        .background(.fill.secondary, in: .circle)
+        .overlay(Circle().strokeBorder(Color.primary.opacity(0.22), lineWidth: 1))
+        .frame(width: 40, height: 40)
+    } else {
+      icon
+        .foregroundStyle(.primary)
+        .glassEffect(.regular, in: .circle)
+        .frame(width: 40, height: 40)
+    }
   }
 }

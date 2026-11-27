@@ -119,6 +119,68 @@ struct ProfileTests {
     #expect(!RFCOMMLink.nameLooksLikeBuds(nil))
   }
 
+  @Test @MainActor func connectionDiagnosticsDefaultsAndMapping() {
+    let session = BudsSession()
+    #expect(session.connection == .searching)
+    #expect(session.connectionIssue == .none)
+    #expect(session.connectionStep == .finding)
+    #expect(ConnectionStep.finding.rawValue == 1)
+    #expect(ConnectionStep.linking.rawValue == 2)
+    #expect(ConnectionStep.reading.rawValue == 3)
+    #expect(BudsSession.issue(for: GATTError.unauthorized) == .bluetoothUnauthorized)
+    #expect(BudsSession.issue(for: GATTError.poweredOff) == .bluetoothOff)
+    #expect(BudsSession.issue(for: GATTError.notFound) == .retrying)
+    #expect(BudsSession.issue(for: GATTError.connectFailed(nil)) == .retrying)
+    #expect(BudsSession.issue(for: GATTError.timedOut("Bluetooth")) == .retrying)
+    #expect(BudsSession.issue(for: GATTError.notifyFailed(nil)) == .retrying)
+    #expect(BudsSession.issue(for: GATTError.notSent(12)) == .retrying)
+    #expect(BudsSession.issue(for: GATTError.missing([])) == .generic)
+    #expect(BudsSession.issue(for: GATTError.ambiguous(2)) == .generic)
+    #expect(BudsSession.issue(for: BudsError.disconnected) == .generic)
+    session.clearError()
+    #expect(session.lastError == nil)
+    session.disconnect()
+    #expect(session.pausedByUser)
+    #expect(session.connectionIssue == .none)
+    #expect(session.connectionStep == .finding)
+
+    let snap = LastKnownBuds(
+      pairId: "AA-BB-CC-DD-EE-01",
+      productId: "065414",
+      name: "OnePlus Buds 4",
+      left: 91,
+      right: 88,
+      chargingCase: 66,
+      firmware: "112.112.100",
+      seenAt: Date(timeIntervalSince1970: 1_700_000_000)
+    )
+    let encoded = try? JSONEncoder().encode(snap)
+    let decoded = encoded.flatMap { try? JSONDecoder().decode(LastKnownBuds.self, from: $0) }
+    #expect(decoded == snap)
+    #expect(snap.hasBattery)
+    #expect(snap.matches(pairId: "aa-bb-cc-dd-ee-01"))
+    // Two pairs of the same model must not share cached fallback readings.
+    #expect(!snap.matches(pairId: "AA-BB-CC-DD-EE-02"))
+    #expect(!snap.matches(pairId: nil))
+    // Legacy snapshots without a pairId must not reuse readings.
+    let legacy = LastKnownBuds(productId: "065414", name: "OnePlus Buds 4", left: 50, right: 50, chargingCase: 50, firmware: "112.112.100", seenAt: Date(timeIntervalSince1970: 1_700_000_000))
+    #expect(!legacy.matches(pairId: "AA-BB-CC-DD-EE-01"))
+    #expect(snap.level(for: .left)?.percent == 91)
+    #expect(snap.level(for: .right)?.percent == 88)
+    #expect(snap.level(for: .chargingCase)?.percent == 66)
+  }
+
+  @Test func audioOutputMatching() {
+    // Exact name match wins even when another OnePlus Buds output comes first.
+    #expect(matchBudsOutput(["OnePlus Buds Pro", "OnePlus Buds 3"], named: "OnePlus Buds 3", name: { $0 }) == "OnePlus Buds 3")
+    // Unambiguous single fallback matches when the exact name is unavailable.
+    #expect(matchBudsOutput(["MacBook Speakers", "OnePlus Buds 4"], named: "Renamed Buds", name: { $0 }) == "OnePlus Buds 4")
+    // Multiple substring fallbacks with no exact match return nil rather than picking the wrong pair.
+    #expect(matchBudsOutput(["OnePlus Buds Pro", "OnePlus Buds 3"], named: "OnePlus Buds 4", name: { $0 }) == nil)
+    #expect(matchBudsOutput(["OnePlus Buds Pro", "OnePlus Buds 3"], named: nil, name: { $0 }) == nil)
+    #expect(matchBudsOutput(["MacBook Speakers"], named: "OnePlus Buds 4", name: { $0 }) == nil)
+  }
+
   /// The same table as ModelProfile in app/src/lib/protocol.ts, through app/tests/fixtures/profiles.json.
   @Test func profilesMatchTheFixtureSharedWithTheWebTests() throws {
     let fixture = try #require(load("profiles.json") as? [String: [String: Any]])

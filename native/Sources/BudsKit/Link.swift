@@ -42,7 +42,12 @@ final class GATTLink: NSObject {
     close()
     let central = self.central ?? CBCentralManager(delegate: self, queue: .main)
     self.central = central
-    if central.state != .poweredOn { try await wait(for: .power, timeout: 5) {} }
+    switch central.state {
+    case .poweredOn: break
+    case .unauthorized: throw GATTError.unauthorized
+    case .poweredOff, .unsupported: throw GATTError.poweredOff
+    default: try await wait(for: .power, timeout: 5) {}
+    }
     let found = central.retrieveConnectedPeripherals(withServices: Self.systemServices)
     guard !found.isEmpty else { throw GATTError.notFound }
     // CoreBluetooth does not expose the Bluetooth address, so only an unambiguous match is safe:
@@ -286,6 +291,19 @@ final class RFCOMMLink: NSObject {
     let name = name ?? ""
     return name.localizedCaseInsensitiveContains("OnePlus") && name.localizedCaseInsensitiveContains("Buds")
   }
+}
+
+/// Matches the connected earbuds' Bluetooth output device: prefers exact name match, and falls back
+/// to a `"OnePlus Buds"` substring match only when unambiguous (exactly one match).
+public nonisolated func matchBudsOutput<T>(_ outputs: [T], named target: String?, name: (T) -> String) -> T? {
+  if let target, let exact = outputs.first(where: { name($0) == target }) {
+    return exact
+  }
+  let fallback = outputs.filter { name($0).localizedCaseInsensitiveContains("OnePlus Buds") }
+  return fallback.count == 1 ? fallback.first : nil
+}
+
+extension RFCOMMLink {
 
   func channelID(on device: IOBluetoothDevice) async -> BluetoothRFCOMMChannelID? {
     if let id = Self.cachedChannel(device) { return id }
